@@ -999,10 +999,10 @@ class flatsim(object):
 
         if self.verbose:
             print("\n---------------------------------")
-            print(f"    Computing ionospheric ramps with RGP TEC model")
+            print(f"    Computing ionospheric ramps with IGS TEC model")
             
         if self.verbose:
-            print(f"\n        Fetch RGP TEC data for all dates...")
+            print(f"\n        Fetch IGS TEC data for all dates...")
 
         num_prod = []
         for date in tqdm(self.dates):
