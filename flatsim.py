@@ -20,6 +20,7 @@ from spacepy import pycdf
 
 # Some figure parameters...
 import matplotlib
+matplotlib.use('Agg')
 plt.rcParams['figure.figsize'] = [8,5]
 plt.rcParams['figure.dpi'] = 300
 
