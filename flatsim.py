@@ -20,7 +20,8 @@ from spacepy import pycdf
 
 # Some figure parameters...
 import matplotlib
-matplotlib.use('Agg')
+if os.environ["TERM"].startswith("screen"):
+    matplotlib.use('Agg')
 plt.rcParams['figure.figsize'] = [8,5]
 plt.rcParams['figure.dpi'] = 300
 
