@@ -1,3 +1,15 @@
-# Scripts
+# FlatsimCorr
 
-A project to gather diverse scripts, mainly developed as utils in the NSBAS framework.
+Tools in Python to evaluate diverse systematic corrections for large InSAR time-series.
+
+Requires:
+- Python
+- Matplotlib
+- Numpy
+- Scipy
+- tqdm
+- gdal
+- cartopy
+- spacepy
+
+
