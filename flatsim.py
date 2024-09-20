@@ -688,42 +688,46 @@ class flatsim(object):
             else:
                 sys.exit('Problem with IGS files or times...')
 
-            # Interpolate the TEC map at lat-lon of the radar image projected on ionosphere layer
-            lon_arr, lat_arr = np.meshgrid(lon_grid, lat_grid)
-            TEC_interp_before = griddata((lat_arr.ravel(), lon_arr.ravel()), TEC_before.ravel(), (self.lat_iono[::skip_res,::skip_res], self.lon_iono_before[::skip_res,::skip_res]), method='cubic')
-            TEC_interp_after = griddata((lat_arr.ravel(), lon_arr.ravel()), TEC_after.ravel(), (self.lat_iono[::skip_res,::skip_res], self.lon_iono_after[::skip_res,::skip_res]), method='cubic')
+            if np.mean(TEC_before) < -1e10 or np.mean(TEC_after) < -1e10:
+                return None
+            
+            else:
+                # Interpolate the TEC map at lat-lon of the radar image projected on ionosphere layer
+                lon_arr, lat_arr = np.meshgrid(lon_grid, lat_grid)
+                TEC_interp_before = griddata((lat_arr.ravel(), lon_arr.ravel()), TEC_before.ravel(), (self.lat_iono[::skip_res,::skip_res], self.lon_iono_before[::skip_res,::skip_res]), method='cubic')
+                TEC_interp_after = griddata((lat_arr.ravel(), lon_arr.ravel()), TEC_after.ravel(), (self.lat_iono[::skip_res,::skip_res], self.lon_iono_after[::skip_res,::skip_res]), method='cubic')
 
-            # Interpolate in time
-            before_coef = (self.igs_time_after*2-self.mean_time_utc)/(self.igs_time_after*2-self.igs_time_before*2)
-            after_coef = (self.mean_time_utc-self.igs_time_before*2)/(self.igs_time_after*2-self.igs_time_before*2)
-            E = before_coef * TEC_interp_before + after_coef * TEC_interp_after
+                # Interpolate in time
+                before_coef = (self.igs_time_after*2-self.mean_time_utc)/(self.igs_time_after*2-self.igs_time_before*2)
+                after_coef = (self.mean_time_utc-self.igs_time_before*2)/(self.igs_time_after*2-self.igs_time_before*2)
+                E = before_coef * TEC_interp_before + after_coef * TEC_interp_after
 
-            # PLOT
-            if plot or saveplot:
-                fig, axs = plt.subplots(1,3, sharey=True)
+                # PLOT
+                if plot or saveplot:
+                    fig, axs = plt.subplots(1,3, sharey=True)
 
-                vmin = np.nanmin(np.minimum(TEC_interp_before, TEC_interp_after))
-                vmax = np.nanmax(np.maximum(TEC_interp_before, TEC_interp_after))
+                    vmin = np.nanmin(np.minimum(TEC_interp_before, TEC_interp_after))
+                    vmax = np.nanmax(np.maximum(TEC_interp_before, TEC_interp_after))
 
-                axs[0].imshow(TEC_interp_before, vmin=vmin, vmax=vmax)
-                axs[1].imshow(E, vmin=vmin, vmax=vmax)
-                pcm = axs[2].imshow(TEC_interp_after, vmin=vmin, vmax=vmax)
+                    axs[0].imshow(TEC_interp_before, vmin=vmin, vmax=vmax)
+                    axs[1].imshow(E, vmin=vmin, vmax=vmax)
+                    pcm = axs[2].imshow(TEC_interp_after, vmin=vmin, vmax=vmax)
 
-                plt.colorbar(pcm, ax=axs, label='E (TECU)', shrink=0.5)
+                    plt.colorbar(pcm, ax=axs, label='E (TECU)', shrink=0.5)
 
-                axs[0].set_title(f'{self.igs_time_before*2}h model')
-                axs[1].set_title(f'Weighted average')
-                axs[2].set_title(f'{self.igs_time_after*2}h model')
+                    axs[0].set_title(f'{self.igs_time_before*2}h model')
+                    axs[1].set_title(f'Weighted average')
+                    axs[2].set_title(f'{self.igs_time_after*2}h model')
 
-                fig.suptitle(f'{date} - {round(self.mean_time_utc, 1)}h')
+                    fig.suptitle(f'{date} - {round(self.mean_time_utc, 1)}h')
 
-                if plot:
-                    plt.show()
-                if saveplot:
-                    plt.savefig(os.path.join(self.local_igs_dir, 'TEC_'+date+'.jpg'))
-                plt.close()
+                    if plot:
+                        plt.show()
+                    if saveplot:
+                        plt.savefig(os.path.join(self.local_igs_dir, 'TEC_'+date+'.jpg'))
+                    plt.close()
 
-        return E
+                return E
 
     def ground2IPP(self, lon=None, lat=None, H=400, pad=200, time_shifts=None, plot=True, saveplot=False):
         '''
@@ -1046,11 +1050,17 @@ class flatsim(object):
                 # Get the TEC 
                 tec = self.computeTecIGS(date, model=model, skip_res=skip_res, plot=False, saveplot=False)
 
-                # Then convert to phase
-                ips = self.Tec2Ips(tec)
+                if tec is None:
+                    self.ramp_az_igs[model][i] = np.nan
+                    self.ramp_ra_igs[model][i] = np.nan
+                    self.ramp_sig_igs[model][i] = np.nan
 
-                # Then fit ramps
-                self.ramp_az_igs[model][i], self.ramp_ra_igs[model][i], self.ramp_sig_igs[model][i] = self.fitPhaseRamp(ips, skip_res=skip_res)
+                else:
+                    # Then convert to phase
+                    ips = self.Tec2Ips(tec)
+
+                    # Then fit ramps
+                    self.ramp_az_igs[model][i], self.ramp_ra_igs[model][i], self.ramp_sig_igs[model][i] = self.fitPhaseRamp(ips, skip_res=skip_res)
 
         # Put zeros to nan
         self.ramp_az_igs[model][self.ramp_az_igs == 0.] = np.nan
@@ -1064,22 +1074,27 @@ class flatsim(object):
         else:
             sys.exit('Ramp of first date is NaN, reference in another way...')
 
-        # Save AZIMUTH ramps
-        header = f'date_decyr az_ramp / number_of_products date'
-        file = os.path.join(self.local_igs_dir, f'list_ramp_az_IGS_{model}.txt')
-        arr = np.c_[ self.dates_decyr, self.ramp_az_igs[model], np.zeros(self.Ndates), num_prod, self.dates ].astype(float)
-        np.savetxt(file, arr, fmt='%.6f % .7e % .7e %  2i % 6d', header=header)
+        if np.isnan(self.ramp_az_igs[model]).all() or np.isnan(self.ramp_ra_igs[model]).all():
+            if self.verbose:
+                print(f"\n        No TEC data in the files for {model} model, no ramps computed")
 
-        # Save RANGE ramps
-        header = f'date_decyr ra_ramp / number_of_products date'
-        file = os.path.join(self.local_igs_dir, f'list_ramp_ra_IGS_{model}.txt')
-        arr = np.c_[ self.dates_decyr, self.ramp_ra_igs[model], np.zeros(self.Ndates), num_prod, self.dates ].astype(float)
-        np.savetxt(file, arr, fmt='%.6f % .7e % .7e %  2i % 6d', header=header)
+        else:
+            # Save AZIMUTH ramps
+            header = f'date_decyr az_ramp / number_of_products date'
+            file = os.path.join(self.local_igs_dir, f'list_ramp_az_IGS_{model}.txt')
+            arr = np.c_[ self.dates_decyr, self.ramp_az_igs[model], np.zeros(self.Ndates), num_prod, self.dates ].astype(float)
+            np.savetxt(file, arr, fmt='%.6f % .7e % .7e %  2i % 6d', header=header)
 
-        # Save SIGMA
-        header = f'date_decyr sigma date'
-        file = os.path.join(self.local_igs_dir, f'list_ramp_sigma_IGS_{model}.txt')
-        arr = np.c_[ self.dates_decyr, self.ramp_sig_igs[model], self.dates ].astype(float)
-        np.savetxt(file, arr, fmt='%.6f % .7e % 6d')
+            # Save RANGE ramps
+            header = f'date_decyr ra_ramp / number_of_products date'
+            file = os.path.join(self.local_igs_dir, f'list_ramp_ra_IGS_{model}.txt')
+            arr = np.c_[ self.dates_decyr, self.ramp_ra_igs[model], np.zeros(self.Ndates), num_prod, self.dates ].astype(float)
+            np.savetxt(file, arr, fmt='%.6f % .7e % .7e %  2i % 6d', header=header)
+
+            # Save SIGMA
+            header = f'date_decyr sigma date'
+            file = os.path.join(self.local_igs_dir, f'list_ramp_sigma_IGS_{model}.txt')
+            arr = np.c_[ self.dates_decyr, self.ramp_sig_igs[model], self.dates ].astype(float)
+            np.savetxt(file, arr, fmt='%.6f % .7e % 6d')
 
         return
