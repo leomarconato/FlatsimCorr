@@ -20,12 +20,12 @@ from spacepy import pycdf
 
 # Some figure parameters...
 import matplotlib
-if os.environ["TERM"].startswith("screen"):
+if os.environ["TERM"].startswith("screen"): # cluster
     matplotlib.use('Agg')
+else:  # laptop
+    matplotlib.rc('font', **{'family':'Arial', 'weight':'medium', 'size':8, 'style':'normal'})
 plt.rcParams['figure.figsize'] = [8,5]
 plt.rcParams['figure.dpi'] = 300
-
-matplotlib.rc('font', **{'family':'Arial', 'weight':'medium', 'size':8, 'style':'normal'})
 
 class flatsim(object):
 
