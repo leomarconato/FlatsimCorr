@@ -835,7 +835,7 @@ class flatsim(object):
 
         return
 
-    def Tec2Ips(self, E, wavelength=0.0556, top_iono=0.9, plot=False):
+    def Tec2Ips(self, E, skip_res=1, wavelength=0.0556, top_iono=0.9, plot=False):
         '''
         Compute the Ionospheric Phase Screen from a TEC map.
 
@@ -855,7 +855,7 @@ class flatsim(object):
         c = 299792458             # Speed of light
         f = c/wavelength
 
-        skip_res = round(self.incidence.shape[0]/E.shape[0])
+        #skip_res = round(self.incidence.shape[0]/E.shape[0])
         ips = - top_iono * 4 * np.pi * K / (c*f) * E * 10**(16) * 1/np.cos(np.radians(self.incidence[::skip_res,::skip_res]))
 
         if plot:
@@ -968,7 +968,7 @@ class flatsim(object):
                 tec = self.computeTecRGP(date, skip_res=skip_res, plot=False, saveplot=False)
 
                 # Then convert to phase
-                ips = self.Tec2Ips(tec)
+                ips = self.Tec2Ips(tec, skip_res=skip_res)
 
                 # Then fit ramps
                 self.ramp_az_rgp[i], self.ramp_ra_rgp[i], self.ramp_sig_rgp[i] = self.fitPhaseRamp(ips, skip_res=skip_res)
@@ -1075,7 +1075,7 @@ class flatsim(object):
 
                 else:
                     # Then convert to phase
-                    ips = self.Tec2Ips(tec)
+                    ips = self.Tec2Ips(tec, skip_res=skip_res)
 
                     # Then fit ramps
                     self.ramp_az_igs[model][i], self.ramp_ra_igs[model][i], self.ramp_sig_igs[model][i] = self.fitPhaseRamp(ips, skip_res=skip_res)
