@@ -855,7 +855,7 @@ class flatsim(object):
         c = 299792458             # Speed of light
         f = c/wavelength
 
-        skip_res = round(self.incidence.shape[0]/E.shape[0]+1)
+        skip_res = round(self.incidence.shape[0]/E.shape[0])
         ips = - top_iono * 4 * np.pi * K / (c*f) * E * 10**(16) * 1/np.cos(np.radians(self.incidence[::skip_res,::skip_res]))
 
         if plot:
