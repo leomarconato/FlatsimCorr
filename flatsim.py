@@ -75,13 +75,13 @@ class flatsim(object):
         self.aux_dir = None
 
         for dir in dirs:
-            if self.name in dir and 'TS' in dir:
+            if self.name in dir and 'TS' in dir and not 'QO' in dir:
                 if self.verbose:
                     print(dir)
                     print("         -> Set as TS directory")
                 self.ts_dir = dir
 
-            if self.name in dir and 'DAUX' in dir:
+            if self.name in dir and 'DAUX' in dir and not 'QO' in dir:
                 if self.verbose:
                     print(dir)
                     print("         -> Set as AUX directory")
