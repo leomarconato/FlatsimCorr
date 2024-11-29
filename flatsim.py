@@ -499,10 +499,13 @@ class flatsim(object):
                 print(f'{igs_file} not found on server')
 
         if self.igs_time_after == 12:
-            if date[4:] == '1231':
-                sys.exit('/!\ Acquisition around 23h on 31st of December => download next year not implemented!')
             # DOWNLOAD next day
+            #if date[4:] == '1231':
+            #    sys.exit('/!\ Acquisition around 23h on 31st of December => download next year not implemented!')
+            # It should actually work with timedelta 
+            #else:
             next_date = datetime.date(int(date[:4]), int(date[4:6]), int(date[6:8])) + datetime.timedelta(1)
+
             next_date = next_date.strftime("%Y%m%d")
             igs_file=f'gps_tec2hr_igs_{next_date}_v01.cdf'
             local_file = os.path.join(self.local_igs_dir, igs_file)
