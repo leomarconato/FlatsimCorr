@@ -213,29 +213,41 @@ class flatsim(object):
             print("    Load the acquisition time from the TS cube .meta file (mean of the acquisition times of the master's .SAFE)")
 
         # Get names of de master SAFE
-        safes = self.parseMeta('Super_master_SAR_image_ID')[0].split('-')[::2]
-    
-        # Extract strat and stop times of acquisition from SAFE name
-        times = [safe.split('T')[1:3] for safe in safes]
-        times = sum(times, [])
-        times = [time.split('_')[0] for time in times] 
+        temp = self.parseMeta('Super_master_SAR_image_ID')[0]
+        
+        if temp == 'burst':
+            print("    /!\ No SAFE name in .meta -> we use 'Reference_date' keyword")
+            time_iso = self.parseMeta('Reference_date')[0]
+            dt = datetime.datetime.fromisoformat(time_iso[:-1])
+            time = dt.hour + dt.minute/60 + dt.second/3600
+            self.min_time_utc = time
+            self.max_time_utc = time
+            self.mean_time_utc = time
 
-        # Convert to decimal hours
-        times = [int(time[:2])+int(time[2:4])/60 + int(time[4:])/3600 for time in times]
+        else:
+            safes = temp.split('-')[::2]
+        
+            # Extract strat and stop times of acquisition from SAFE name
+            times = [safe.split('T')[1:3] for safe in safes]
+            times = sum(times, [])
+            times = [time.split('_')[0] for time in times] 
 
-        # /!\ If acquisition spans midnight
-        if times[0] > times[-1]:
-            print('/!\ The acquisition is spanning midnight: mean_time_utc may be wrong!')
-    
-        self.min_time_utc = min(times)
-        self.max_time_utc = max(times)
-        self.mean_time_utc = np.mean(times)
+            # Convert to decimal hours
+            times = [int(time[:2])+int(time[2:4])/60 + int(time[4:])/3600 for time in times]
+
+            # /!\ If acquisition spans midnight
+            if times[0] > times[-1]:
+                print('/!\ The acquisition is spanning midnight: mean_time_utc may be wrong!')
+        
+            self.min_time_utc = min(times)
+            self.max_time_utc = max(times)
+            self.mean_time_utc = np.mean(times)
 
         if self.verbose:
             print(f"        -> acquisition time UTC: {self.mean_time_utc:.3f}h (from {self.min_time_utc:.3f}h to {self.max_time_utc:.3f}h)")
 
         return
-    
+
     def getLatLon(self, plot=False):
         '''
         Read (and plot) the LUT containing lat and lon information in radar geometry.
