@@ -514,7 +514,10 @@ class flatsim(object):
                 self.igs_files[date].append(local_file)
             else:
                 try:
-                    url = f'https://cdaweb.gsfc.nasa.gov/pub/data/gps/tec2hr_igs/{year}/{igs_file}'
+                    if date[4:] == '1231':
+                        url = f'https://cdaweb.gsfc.nasa.gov/pub/data/gps/tec2hr_igs/{year+1}/{igs_file}'
+                    else:
+                        url = f'https://cdaweb.gsfc.nasa.gov/pub/data/gps/tec2hr_igs/{year}/{igs_file}'
                     urllib.request.urlretrieve(url, filename=local_file)
                     self.igs_files[date].append(local_file)
                 except:
