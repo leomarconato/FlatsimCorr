@@ -17,6 +17,8 @@ import cartopy
 import string
 import ftplib, urllib
 from spacepy import pycdf
+import netCDF4
+import gzip
 
 # Some figure parameters...
 import matplotlib
@@ -526,6 +528,77 @@ class flatsim(object):
 
         return
 
+    def downloadTecJPLD(self, date, dir=None, replace=False):
+        '''
+        Download the netCDF files from sideshow.jpl.nasa.gov corresponding to the JPLD model for one date (Martire et al., 2024)
+        Requires max_time_utc variable.
+            -> run after getAcquisitionTime
+
+        Args:
+            * date    : date to consider (YYYMMDD)
+
+        Kwargs:
+            * dir     : relative path to store iono files in a 'iono_jpld' folder (default, self.savedir)
+            * replace : re-download the .nc.gz file if existing (default, False)
+
+        Returns:
+            * None
+        '''
+        # Create dict to store local paths to ionest files, if not existing alread
+        if not hasattr(self, 'jpld_files'):
+            self.jpld_files = {}
+
+        # Local directory to store files
+        self.local_jpld_dir = os.path.join(self.savedir, 'iono_jpld')
+        if not os.path.isdir(self.local_jpld_dir):
+            os.makedirs(self.local_jpld_dir)
+
+        year = date[:4]
+        self.jpld_time_before = int(np.floor(self.mean_time_utc*4)) # Convert to 15' sampling
+        self.jpld_time_after = int(np.ceil(self.mean_time_utc*4))
+
+        # Find index (day of the year)
+        idx = datetime.date(int(date[:4]), int(date[4:6]), int(date[6:8])).strftime('%j')
+
+        # DOWNLOAD actual day
+        jpld_file = f'jpld{idx}0.{year[2:]}i.nc.gz'
+        local_file = os.path.join(self.local_jpld_dir, jpld_file)
+
+        self.jpld_files[date] = []
+
+        if os.path.isfile(local_file) and not replace:
+            self.jpld_files[date].append(local_file)
+        else:
+            try:
+                url = f'https://sideshow.jpl.nasa.gov/pub/iono_daily/gim_for_research/jpld/{year}/{jpld_file}'
+                urllib.request.urlretrieve(url, filename=local_file)
+                self.jpld_files[date].append(local_file)
+            except:
+                os.remove(local_file)
+                print(f'{jpld_file} not found on server')
+
+        if self.jpld_time_after == 96:
+            next_date = datetime.date(int(date[:4]), int(date[4:6]), int(date[6:8])) + datetime.timedelta(1)
+            idx = next_date.strftime('%j')
+            jpld_file = f'jpld{idx}0.{year[2:]}i.nc.gz'
+            local_file = os.path.join(self.local_jpld_dir, jpld_file)
+
+            if os.path.isfile(local_file) and not replace:
+                self.jpld_files[date].append(local_file)
+            else:
+                try:
+                    if date[4:] == '1231':
+                        url = f'https://cdaweb.gsfc.nasa.gov/pub/data/gps/tec2hr_igs/{year+1}/{jpld_file}'
+                    else:
+                        url = f'https://cdaweb.gsfc.nasa.gov/pub/data/gps/tec2hr_igs/{year}/{jpld_file}'
+                    urllib.request.urlretrieve(url, filename=local_file)
+                    self.jpld_files[date].append(local_file)
+                except:
+                    os.remove(local_file)
+                    print(f'{jpld_file} not found on server')
+
+        return
+
     def ion2TecRGP(self, ionfile, skip_res):
         '''
         Compute a TEC map from a IONEX file download from RGP.
@@ -580,13 +653,13 @@ class flatsim(object):
         Compute the TEC map in radar geometry for one date of the TS, 
         as a weighted average of the predictions of the previous and next hour RGP models.
         Requires the rgp_files, local_ion_dir, mean_time_utc, local_rgp_dir, lon_iono lat_iono variables.
-            -> run after getAcquisitionTime, getLatLon, downloadTecIGS and ground2IPP
+            -> run after getAcquisitionTime, getLatLon, downloadTecRGP and ground2IPP
 
         Args:
             * date    : date to consider (YYYMMDD)
 
         Kwargs:
-            * skip_res   : decimation factor in range and azimuth (default, 50)
+            * skip_res   : decimation factor in range and azimuth (default, 100)
             * plot       : plot the TEC map
             * saveplot   : save the plot of the TEC
 
@@ -670,7 +743,7 @@ class flatsim(object):
 
         Kwargs:
             * model      : model to used: IGS, JPL, CODE, ESA, UPC (default, IGS)
-            * skip_res   : decimation factor in range and azimuth (default, 50)
+            * skip_res   : decimation factor in range and azimuth (default, 100)
             * plot       : plot the TEC map
             * saveplot   : save the plot of the TEC
 
@@ -747,6 +820,102 @@ class flatsim(object):
 
                 return E
 
+    def computeTecJPLD(self, date, skip_res=100, plot=False, saveplot=True):
+        '''
+        Compute the TEC map in radar geometry for one date of the TS, 
+        using temporal interpolation of JPLD models for previous and next steps (15' sampling).
+        Requires the jpld_files, local_ion_dir, mean_time_utc, local_jpld_dir, lon_iono_before, lon_iono_after and lat_iono variables.
+            -> run after getAcquisitionTime, getLatLon, downloadTecIGS and ground2IPP
+
+        Args:
+            * date    : date to consider (YYYMMDD)
+
+        Kwargs:
+            * skip_res   : decimation factor in range and azimuth (default, 100)
+            * plot       : plot the TEC map
+            * saveplot   : save the plot of the TEC
+
+        Returns:
+            * TEC array in radar geometry, decimated by skip_res**2, in TECU
+        '''
+
+        # Check what is available
+        
+        if not hasattr(self, 'jpld_files'):
+            sys.exit("You need to download the TEC data first")
+
+        elif date not in self.jpld_files.keys():
+            sys.exit("TEC data has not been downloaded for "+date)
+
+        elif len(self.jpld_files[date]) == 0:
+            print(f"No TEC data found for {date}: TEC map not computed")
+
+        else:
+            if len(self.jpld_files[date]) == 1: # Normal case: both time steps are in the same daily file
+                # Read file
+                with gzip.open(self.jpld_files[date][0]) as gz:
+                    with netCDF4.Dataset('dummy', mode='r', memory=gz.read()) as cdf:
+                        lon_grid = np.array(cdf['lon'])
+                        lat_grid = np.array(cdf['lat'])
+                        TEC_before = np.array(cdf['tecmap'][self.jpld_time_before,:,:])
+                        TEC_after = np.array(cdf['tecmap'][self.jpld_time_after,:,:])
+
+            elif self.jpld_time_after == 96 and len(self.jpld_files[date]) == 2: # If next time step is in another file (next day)
+                # Read file 1
+                with gzip.open(self.jpld_files[date][0]) as gz:
+                    with netCDF4.Dataset('dummy', mode='r', memory=gz.read()) as cdf:
+                        lon_grid = np.array(cdf['lon'])
+                        lat_grid = np.array(cdf['lat'])
+                        TEC_before = np.array(cdf['tecmap'][self.jpld_time_before,:,:])
+                # Read file 2
+                with gzip.open(self.jpld_files[date][1]) as gz:
+                    with netCDF4.Dataset('dummy', mode='r', memory=gz.read()) as cdf:
+                        TEC_before = np.array(cdf['tecmap'][0,:,:])
+            
+            else:
+                sys.exit('Problem with JPLD files or times...')
+
+            if np.mean(TEC_before) < -1e10 or np.mean(TEC_after) < -1e10:
+                return None
+            
+            else:
+                # Interpolate the TEC map at lat-lon of the radar image projected on ionosphere layer
+                lon_arr, lat_arr = np.meshgrid(lon_grid, lat_grid)
+                TEC_interp_before = griddata((lat_arr.ravel(), lon_arr.ravel()), TEC_before.ravel(), (self.lat_iono[::skip_res,::skip_res], self.lon_iono_before[::skip_res,::skip_res]), method='cubic')
+                TEC_interp_after = griddata((lat_arr.ravel(), lon_arr.ravel()), TEC_after.ravel(), (self.lat_iono[::skip_res,::skip_res], self.lon_iono_after[::skip_res,::skip_res]), method='cubic')
+
+                # Interpolate in time
+                before_coef = (self.jpld_time_after/4-self.mean_time_utc)/(self.jpld_time_after/4-self.jpld_time_before/4)
+                after_coef = (self.mean_time_utc-self.jpld_time_before/4)/(self.jpld_time_after/4-self.jpld_time_before/4)
+                E = before_coef * TEC_interp_before + after_coef * TEC_interp_after
+
+                # PLOT
+                if plot or saveplot:
+                    fig, axs = plt.subplots(1,3, sharey=True)
+
+                    vmin = np.nanmin(np.minimum(TEC_interp_before, TEC_interp_after))
+                    vmax = np.nanmax(np.maximum(TEC_interp_before, TEC_interp_after))
+
+                    axs[0].imshow(TEC_interp_before, vmin=vmin, vmax=vmax)
+                    axs[1].imshow(E, vmin=vmin, vmax=vmax)
+                    pcm = axs[2].imshow(TEC_interp_after, vmin=vmin, vmax=vmax)
+
+                    plt.colorbar(pcm, ax=axs, label='E (TECU)', shrink=0.5)
+
+                    axs[0].set_title(f'{self.jpld_time_before/4}h model')
+                    axs[1].set_title(f'Weighted average')
+                    axs[2].set_title(f'{self.jpld_time_after/4}h model')
+
+                    fig.suptitle(f'{date} - {round(self.mean_time_utc, 1)}h')
+
+                    if plot:
+                        plt.show()
+                    if saveplot:
+                        plt.savefig(os.path.join(self.local_jpld_dir, 'TEC_'+date+'.jpg'))
+                    plt.close()
+
+                return E
+
     def ground2IPP(self, lon=None, lat=None, H=400, pad=200, time_shifts=None, plot=True, saveplot=False):
         '''
         Convert lat-lon on the ground to lat-lon at the ionospheric piercing point (IPP).
@@ -760,6 +929,7 @@ class flatsim(object):
             * time_shifts : shift the longitude to take into account Earth's rotation with respect to the model time
                                 -> should be a list : [t_acquisition-t_model_before, t_acquisition-t_model_after] in decimal hours
                                 -> if set to 'igs', computes directly the shifts from the acquisition and IGS model times (run downloadTecIGS before)
+                                -> if set to 'jpld', same as for 'igs, but for a 15' time sampling
             * plot        : plot the ground and IPP coverage
             * saveplot    : save this plot
 
@@ -792,6 +962,8 @@ class flatsim(object):
 
             if time_shifts == 'igs':
                 time_shifts = [self.mean_time_utc-self.igs_time_before*2, self.mean_time_utc-self.igs_time_after*2]
+            if time_shifts == 'jpld':
+                time_shifts = [self.mean_time_utc-self.jpld_time_before/4, self.mean_time_utc-self.jpld_time_after/4]
 
             self.lon_iono_before = self.lon_iono + omega * time_shifts[0]
             self.lon_iono_after  = self.lon_iono + omega * time_shifts[1]
@@ -828,7 +1000,7 @@ class flatsim(object):
                 plt.show()
             if saveplot:
                 if time_shifts is not None:
-                    outfile = f'IPP_projection_{self.name}_earth_rotation.jpg'
+                    outfile = f'IPP_projection_{self.name}_earth_rotation_{time_shifts}.jpg'
                 else:
                     outfile = f'IPP_projection_{self.name}.jpg'
                 plt.savefig(os.path.join(self.savedir, outfile))
@@ -1113,6 +1285,117 @@ class flatsim(object):
             header = f'date_decyr sigma date'
             file = os.path.join(self.local_igs_dir, f'list_ramp_sigma_IGS_{model}.txt')
             arr = np.c_[ self.dates_decyr, self.ramp_sig_igs[model], self.dates ].astype(float)
+            np.savetxt(file, arr, fmt='%.6f % .7e % 6d')
+
+        return
+
+    def computeTecRampsJPLD(self, skip_res=100):
+        '''
+        Compute ramps due to TEC from the JPLD research GIM (1°, 15' resolution).
+
+        Kwargs:
+            * skip_res   : decimation factor in range and azimuth (default, 100)
+
+        Returns:
+            * None
+        '''
+
+        self.getAcquisitionTime()
+        self.getLatLon()
+        self.getIncidence()
+
+        if self.verbose:
+            print("\n---------------------------------")
+            print(f"    Computing ionospheric ramps with JPLD TEC model")
+            
+        if self.verbose:
+            print(f"\n        Fetch JPLD TEC data for all dates...")
+
+        num_prod = []
+        for date in tqdm(self.dates):
+            
+            self.downloadTecJPLD(date)
+            num_prod.append(len(self.jpld_files[date]))
+
+        num_prod = np.array(num_prod)
+        
+        if np.count_nonzero(num_prod) < self.Ndates:
+            print(f'            -> {self.Ndates-np.count_nonzero(num_prod)} out of {self.Ndates} have no TEC data on the JPLD repository')
+        else:
+            print(f'            -> All dates have TEC data on the JPLD repository')
+
+        if self.verbose:
+            print(f"\n        Compute IPP coordinates taking in to account the Earth's rotation...")
+
+        self.ground2IPP(time_shifts='jpld', plot=False, saveplot=True)
+
+        if self.verbose:
+            print(f"\n        Compute TEC maps and fit ramps for all dates...")
+
+        if not hasattr(self, 'ramp_az_jpld'):
+            self.ramp_az_jpld = {}
+        if not hasattr(self, 'ramp_ra_jpld'):
+            self.ramp_ra_jpld = {}
+        if not hasattr(self, 'ramp_sig_jpld'):
+            self.ramp_sig_jpld = {}
+        
+        self.ramp_az_jpld = np.zeros(self.Ndates)
+        self.ramp_ra_jpld = np.zeros(self.Ndates)
+        self.ramp_sig_jpld = np.zeros(self.Ndates)
+
+        for i in tqdm(range(self.Ndates)):
+            date = self.dates[i]
+
+            if num_prod[i] > 0:
+
+                # Get the TEC 
+                tec = self.computeTecJPLD(date, skip_res=skip_res, plot=False, saveplot=False)
+
+                if tec is None:
+                    self.ramp_az_jpld[i] = np.nan
+                    self.ramp_ra_jpld[i] = np.nan
+                    self.ramp_sig_jpld[i] = np.nan
+
+                else:
+                    # Then convert to phase
+                    ips = self.Tec2Ips(tec, skip_res=skip_res)
+
+                    # Then fit ramps
+                    self.ramp_az_jpld[i], self.ramp_ra_jpld[i], self.ramp_sig_jpld[i] = self.fitPhaseRamp(ips, skip_res=skip_res)
+
+        # Put zeros to nan
+        self.ramp_az_jpld[self.ramp_az_jpld == 0.] = np.nan
+        self.ramp_ra_jpld[self.ramp_ra_jpld == 0.] = np.nan
+        self.ramp_sig_jpld[self.ramp_sig_jpld == 0.] = np.nan
+        
+        # Reference with first date
+        if self.ramp_az_jpld[0] != np.nan:
+            self.ramp_az_jpld -= self.ramp_az_jpld[0]
+            self.ramp_ra_jpld -= self.ramp_ra_jpld[0]
+        else:
+            sys.exit('Ramp of first date is NaN, reference in another way...')
+
+        if np.isnan(self.ramp_az_jpld).all() or np.isnan(self.ramp_ra_jpld).all():
+            if self.verbose:
+                print(f"\n        No TEC data in the files, no ramps computed")
+
+        else:
+            # Save AZIMUTH ramps
+            header = f'date_decyr az_ramp / number_of_products date'
+            file = os.path.join(self.local_jpld_dir, f'list_ramp_az_JPLD.txt')
+            arr = np.c_[ self.dates_decyr, self.ramp_az_jpld, np.zeros(self.Ndates), num_prod, self.dates ].astype(float)
+            np.savetxt(file, arr, fmt='%.6f % .7e % .7e %  2i % 6d', header=header)
+
+            # Save RANGE ramps
+            header = f'date_decyr ra_ramp / number_of_products date'
+            file = os.path.join(self.local_jpld_dir, f'list_ramp_ra_JPLD.txt')
+            arr = np.c_[ self.dates_decyr, self.ramp_ra_jpld, np.zeros(self.Ndates), num_prod, self.dates ].astype(float)
+            np.savetxt(file, arr, fmt='%.6f % .7e % .7e %  2i % 6d', header=header)
+
+            # Save SIGMA
+            header = f'date_decyr sigma date'
+            file = os.path.join(self.local_jpld_dir, f'list_ramp_sigma_JPLD.txt')
+            arr = np.c_[ self.dates_decyr, self.ramp_sig_jpld, self.dates ].astype(float)
             np.savetxt(file, arr, fmt='%.6f % .7e % 6d')
 
         return
