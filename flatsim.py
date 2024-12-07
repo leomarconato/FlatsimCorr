@@ -870,7 +870,7 @@ class flatsim(object):
                 # Read file 2
                 with gzip.open(self.jpld_files[date][1]) as gz:
                     with netCDF4.Dataset('dummy', mode='r', memory=gz.read()) as cdf:
-                        TEC_before = np.array(cdf['tecmap'][0,:,:])
+                        TEC_after = np.array(cdf['tecmap'][0,:,:])
             
             else:
                 sys.exit('Problem with JPLD files or times...')
@@ -961,8 +961,10 @@ class flatsim(object):
         if time_shifts is not None:
 
             if time_shifts == 'igs':
+                suff = 'igs'
                 time_shifts = [self.mean_time_utc-self.igs_time_before*2, self.mean_time_utc-self.igs_time_after*2]
             if time_shifts == 'jpld':
+                suff = 'jpld'
                 time_shifts = [self.mean_time_utc-self.jpld_time_before/4, self.mean_time_utc-self.jpld_time_after/4]
 
             self.lon_iono_before = self.lon_iono + omega * time_shifts[0]
@@ -1000,7 +1002,7 @@ class flatsim(object):
                 plt.show()
             if saveplot:
                 if time_shifts is not None:
-                    outfile = f'IPP_projection_{self.name}_earth_rotation_{time_shifts}.jpg'
+                    outfile = f'IPP_projection_{self.name}_earth_rotation_{suff}.jpg'
                 else:
                     outfile = f'IPP_projection_{self.name}.jpg'
                 plt.savefig(os.path.join(self.savedir, outfile))
