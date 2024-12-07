@@ -588,9 +588,9 @@ class flatsim(object):
             else:
                 try:
                     if date[4:] == '1231':
-                        url = f'https://cdaweb.gsfc.nasa.gov/pub/data/gps/tec2hr_igs/{year+1}/{jpld_file}'
+                        url = f'https://sideshow.jpl.nasa.gov/pub/iono_daily/gim_for_research/jpld/{int(year)+1}/{jpld_file}'
                     else:
-                        url = f'https://cdaweb.gsfc.nasa.gov/pub/data/gps/tec2hr_igs/{year}/{jpld_file}'
+                        url = f'https://sideshow.jpl.nasa.gov/pub/iono_daily/gim_for_research/jpld/{year}/{jpld_file}'
                     urllib.request.urlretrieve(url, filename=local_file)
                     self.jpld_files[date].append(local_file)
                 except:
