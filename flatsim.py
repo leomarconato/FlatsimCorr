@@ -38,6 +38,7 @@ class flatsim(object):
     Kwargs:
         * datadir   : directory where to look for the TS and AUX flatsim data (default, current dir)
         * savedir   : directory where to store computation files and outputs (default, current dir)
+        * look_unw  : multiloooking factor if the final Flatsim products, to find the files (default, 8)
         * utmzone   : UTM zone (optional)
         * lon0      : Longitude of the utmzone (optional)
         * lat0      : Latitude of the utmzone (optional)
@@ -48,7 +49,7 @@ class flatsim(object):
         * None
     '''
 
-    def __init__(self, name, datadir='.', savedir='.', utmzone=None, ellps='WGS84', lon0=None, lat0=None, verbose=True):
+    def __init__(self, name, datadir='.', savedir='.', look_unw=8, utmzone=None, ellps='WGS84', lon0=None, lat0=None, verbose=True):
 
         self.name = name
         self.verbose = verbose
@@ -95,17 +96,17 @@ class flatsim(object):
 
         # Store usefull file names, and check they are here
 
-        self.file_meta = os.path.join(self.ts_dir, 'CNES_MV-LOS_radar_8rlks.meta')
+        self.file_meta = os.path.join(self.ts_dir, f'CNES_MV-LOS_radar_{look_unw}rlks.meta')
         if not os.path.isfile(self.file_meta):
-            sys.exit("CNES_MV-LOS_radar_8rlks.meta not found")
+            sys.exit(f"CNES_MV-LOS_radar_{look_unw}rlks.meta not found")
 
-        self.file_lut_radar = os.path.join(self.aux_dir, 'CNES_Lut_radar_8rlks.tiff')
+        self.file_lut_radar = os.path.join(self.aux_dir, f'CNES_Lut_radar_{look_unw}rlks.tiff')
         if not os.path.isfile(self.file_lut_radar):
-            sys.exit("CNES_Lut_radar_8rlks.tiff not found")
+            sys.exit(f"CNES_Lut_radar_{look_unw}rlks.tiff not found")
 
-        self.file_los_radar = os.path.join(self.aux_dir, 'CNES_CosENU_radar_8rlks.tiff')
+        self.file_los_radar = os.path.join(self.aux_dir, f'CNES_CosENU_radar_{look_unw}rlks.tiff')
         if not os.path.isfile(self.file_los_radar):
-            sys.exit("CNES_CosENU_radar_8rlks.tiff not found")
+            sys.exit(f"CNES_CosENU_radar_{look_unw}rlks.tiff not found")
 
         # Load image list 
         if self.verbose:
@@ -1039,6 +1040,40 @@ class flatsim(object):
 
         return ips
 
+    def Tec2Ips2(self, E, skip_res=1, hIPP=400, wavelength=0.0556, top_iono=0.9, plot=False):
+        '''
+        Compute the Ionospheric Phase Screen from a TEC map.
+        Implementation of the mapping function of Yunjun et al. (2022).
+
+        Args:
+            * E         : TEC array (in TECU)
+
+        Kwargs:
+            * wavelength : radar wavelength (default, Sentinel-1)
+            * top_iono   : factor to compensate for the top-side part of the ionosphere
+            * plot       : plot the TEC map
+
+        Returns:
+            * Phase array of the size of E, contining the ionospheric phase
+        '''
+
+        K = 40.28                 # Appelton–Hartree equation constant
+        c = 299792458             # Speed of light
+        f = c/wavelength
+        Re = 6371
+
+        thetaIPP = np.arcsin(Re*np.sin(np.radians(self.incidence[::skip_res,::skip_res]))/(Re+hIPP))
+        nIPP = np.arcsin(np.sin(thetaIPP)/(1 + E * 10**(16) * K / f**2))
+
+        ips = - top_iono * 4 * np.pi * K / (c*f) * E * 10**(16) * 1/np.cos(nIPP)
+
+        if plot:
+            plt.figure()
+            plt.imshow(self.wrap(ips), cmap='jet', vmin=-np.pi, vmax=np.pi)
+            plt.colorbar(label='IPS (rad)')
+
+        return ips
+
     def fitPhaseRamp(self, phase, skip_res=1, plot=False):
         '''
         Fit a ramp in a (unwrapped) phase array
@@ -1399,5 +1434,102 @@ class flatsim(object):
             file = os.path.join(self.local_jpld_dir, f'list_ramp_sigma_JPLD.txt')
             arr = np.c_[ self.dates_decyr, self.ramp_sig_jpld, self.dates ].astype(float)
             np.savetxt(file, arr, fmt='%.6f % .7e % 6d')
+
+        return
+    
+    def computeTecRampsRGP2(self, skip_res=100):
+        '''
+        Compute ramps due to TEC from the RGP IONEX model (centered on France)
+
+        Kwargs:
+            * skip_res   : decimation factor in range and azimuth (default, 100)
+
+        Returns:
+            * None
+        '''
+
+        self.getAcquisitionTime()
+        self.getLatLon()
+        self.getIncidence()
+
+        if self.verbose:
+            print("\n---------------------------------")
+            print(f"    Computing ionospheric ramps with RGP TEC model")
+            
+        if self.verbose:
+            print(f"\n        Fetch RGP TEC data for all dates...")
+
+        num_prod = []
+        for date in tqdm(self.dates):
+            
+            self.downloadTecRGP(date)
+            num_prod.append(len(self.rgp_files[date]))
+
+        num_prod = np.array(num_prod)
+        
+        if np.count_nonzero(num_prod) < self.Ndates:
+            print(f'            -> {self.Ndates-np.count_nonzero(num_prod)} out of {self.Ndates} have no TEC data on the RGP repository')
+
+        if np.count_nonzero(num_prod==1) > 0:
+            print(f'            -> {np.count_nonzero(num_prod==1)} out of {self.Ndates} have data for only one time step on the RGP repository')
+    
+        if np.count_nonzero(num_prod) == self.Ndates:
+            print(f'            -> All dates have data for both times steps on the RGP repository')
+
+        if self.verbose:
+            print(f"\n        Compute IPP coordinates...")
+
+        self.ground2IPP(plot=False, saveplot=True)
+
+        if self.verbose:
+            print(f"\n        Compute TEC maps and fit ramps for all dates...")
+
+        self.ramp_az_rgp = np.zeros(self.Ndates)
+        self.ramp_ra_rgp = np.zeros(self.Ndates)
+        self.ramp_sig_rgp = np.zeros(self.Ndates)
+
+        for i in tqdm(range(self.Ndates)):
+            date = self.dates[i]
+
+            if num_prod[i] > 0:
+
+                # Get the TEC 
+                tec = self.computeTecRGP(date, skip_res=skip_res, plot=False, saveplot=False)
+
+                # Then convert to phase
+                ips = self.Tec2Ips2(tec, skip_res=skip_res)
+
+                # Then fit ramps
+                self.ramp_az_rgp[i], self.ramp_ra_rgp[i], self.ramp_sig_rgp[i] = self.fitPhaseRamp(ips, skip_res=skip_res)
+
+        # Put zeros to nan
+        self.ramp_az_rgp[self.ramp_az_rgp == 0.] = np.nan
+        self.ramp_ra_rgp[self.ramp_ra_rgp == 0.] = np.nan
+        self.ramp_sig_rgp[self.ramp_sig_rgp == 0.] = np.nan
+        
+        # Reference with first date
+        if self.ramp_az_rgp[0] != np.nan:
+            self.ramp_az_rgp -= self.ramp_az_rgp[0]
+            self.ramp_ra_rgp -= self.ramp_ra_rgp[0]
+        else:
+            sys.exit('Ramp of first date is NaN, reference in another way...')
+
+        # Save AZIMUTH ramps
+        header = f'date_decyr az_ramp / number_of_products date'
+        file = os.path.join(self.local_rgp_dir, f'list_ramp_az_RGP.txt')
+        arr = np.c_[ self.dates_decyr, self.ramp_az_rgp, np.zeros(self.Ndates), num_prod, self.dates ].astype(float)
+        np.savetxt(file, arr, fmt='%.6f % .7e % .7e %  2i % 6d', header=header)
+
+        # Save RANGE ramps
+        header = f'date_decyr ra_ramp / number_of_products date'
+        file = os.path.join(self.local_rgp_dir, f'list_ramp_ra_RGP.txt')
+        arr = np.c_[ self.dates_decyr, self.ramp_ra_rgp, np.zeros(self.Ndates), num_prod, self.dates ].astype(float)
+        np.savetxt(file, arr, fmt='%.6f % .7e % .7e %  2i % 6d', header=header)
+
+        # Save SIGMA
+        header = f'date_decyr sigma date'
+        file = os.path.join(self.local_rgp_dir, f'list_ramp_sigma_RGP.txt')
+        arr = np.c_[ self.dates_decyr, self.ramp_sig_rgp, self.dates ].astype(float)
+        np.savetxt(file, arr, fmt='%.6f % .7e % 6d')
 
         return
