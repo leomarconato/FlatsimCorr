@@ -6,7 +6,7 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-import os, sys
+import os, sys, shutil
 from osgeo import gdal
 from tqdm import tqdm
 import datetime
@@ -280,8 +280,8 @@ class flatsim(object):
         # If not open manually computed lonlat_file.rmg (ANDES case)
         # Read width in carte_lin.unw.rsc
 
-            os.copy(os.path.join(self.ts_dir, 'lonlat_file.rmg'), './lonlat_file.unw')
-            os.copy(os.path.join(self.ts_dir, 'carte_lin.unw.rsc'), './lonlat_file.unw.rsc')
+            shutil.copy(os.path.join(self.ts_dir, 'lonlat_file.rmg'), './lonlat_file.unw')
+            shutil.copy(os.path.join(self.ts_dir, 'carte_lin.unw.rsc'), './lonlat_file.unw.rsc')
 
             ds = gdal.Open('lonlat_file.unw', gdal.GA_ReadOnly)
             self.lon_radar = ds.GetRasterBand(1).ReadAsArray()
