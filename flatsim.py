@@ -272,6 +272,10 @@ class flatsim(object):
         self.lon_radar = ds.GetRasterBand(1).ReadAsArray()
         self.lat_radar = ds.GetRasterBand(2).ReadAsArray()
 
+        # Check there is data
+        if np.nanstd(self.lon_radar) < 1e-2 or np.nanstd(self.lat_radar) < 1e-2:
+            sys.exit('The LUT file seem corrupted')
+
         if plot:
             fig, axs = plt.subplots(1, 2, sharey=True)#, figsize=(8,4))
             pcm0 = axs[0].imshow(self.lon_radar)
@@ -1062,10 +1066,12 @@ class flatsim(object):
         f = c/wavelength
         Re = 6371
 
-        thetaIPP = np.arcsin(Re*np.sin(np.radians(self.incidence[::skip_res,::skip_res]))/(Re+hIPP))
-        nIPP = np.arcsin(np.sin(thetaIPP)/(1 + E * 10**(16) * K / f**2))
+        vtec = top_iono * E * 10**(16)
 
-        ips = - top_iono * 4 * np.pi * K / (c*f) * E * 10**(16) * 1/np.cos(nIPP)
+        thetaIPP = np.arcsin(Re*np.sin(np.radians(self.incidence[::skip_res,::skip_res]))/(Re+hIPP))
+        nIPP = np.arcsin(np.sin(thetaIPP)/(1 + vtec * K / f**2))
+
+        ips = - 4 * np.pi * K / (c*f) * vtec * 1/np.cos(nIPP)
 
         if plot:
             plt.figure()
