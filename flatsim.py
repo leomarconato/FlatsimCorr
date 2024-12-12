@@ -274,20 +274,20 @@ class flatsim(object):
 
         # Check there is data
         if np.nanstd(self.lon_radar) < 1e-2 or np.nanstd(self.lat_radar) < 1e-2:
-            sys.exit('The LUT file seem corrupted')
+            sys.exit('The LUT file seem corrupted: we use lonlat_file.rmg')
 
         ##################
         # If not open manually computed lonlat_file.rmg (ANDES case)
         # Read width in carte_lin.unw.rsc
 
-        os.copy(os.path.join(self.ts_dir, 'lonlat_file.rmg'), './lonlat_file.unw')
-        os.copy(os.path.join(self.ts_dir, 'carte_lin.unw.rsc'), './lonlat_file.unw.rsc')
+            os.copy(os.path.join(self.ts_dir, 'lonlat_file.rmg'), './lonlat_file.unw')
+            os.copy(os.path.join(self.ts_dir, 'carte_lin.unw.rsc'), './lonlat_file.unw.rsc')
 
-        ds = gdal.Open('lonlat_file.unw', gdal.GA_ReadOnly)
-        self.lon_radar = ds.GetRasterBand(1).ReadAsArray()
-        self.lat_radar = ds.GetRasterBand(2).ReadAsArray()
+            ds = gdal.Open('lonlat_file.unw', gdal.GA_ReadOnly)
+            self.lon_radar = ds.GetRasterBand(1).ReadAsArray()
+            self.lat_radar = ds.GetRasterBand(2).ReadAsArray()
 
-        os.remove('lonlat_file.unw', 'lonlat_file.unw.rsc')
+            os.remove('lonlat_file.unw', 'lonlat_file.unw.rsc')
 
         ##################
 
