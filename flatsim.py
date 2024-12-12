@@ -276,6 +276,21 @@ class flatsim(object):
         if np.nanstd(self.lon_radar) < 1e-2 or np.nanstd(self.lat_radar) < 1e-2:
             sys.exit('The LUT file seem corrupted')
 
+        ##################
+        # If not open manually computed lonlat_file.rmg (ANDES case)
+        # Read width in carte_lin.unw.rsc
+
+        os.copy(os.path.join(self.ts_dir, 'lonlat_file.rmg'), './lonlat_file.unw')
+        os.copy(os.path.join(self.ts_dir, 'carte_lin.unw.rsc'), './lonlat_file.unw.rsc')
+
+        ds = gdal.Open('lonlat_file.unw', gdal.GA_ReadOnly)
+        self.lon_radar = ds.GetRasterBand(1).ReadAsArray()
+        self.lat_radar = ds.GetRasterBand(2).ReadAsArray()
+
+        os.remove('lonlat_file.unw', 'lonlat_file.unw.rsc')
+
+        ##################
+
         if plot:
             fig, axs = plt.subplots(1, 2, sharey=True)#, figsize=(8,4))
             pcm0 = axs[0].imshow(self.lon_radar)
