@@ -274,7 +274,7 @@ class flatsim(object):
 
         # Check there is data
         if np.nanstd(self.lon_radar) < 1e-2 or np.nanstd(self.lat_radar) < 1e-2:
-            sys.exit('The LUT file seem corrupted: we use lonlat_file.rmg')
+            print('The LUT file seem corrupted: we use lonlat_file.rmg')
 
         ##################
         # If not open manually computed lonlat_file.rmg (ANDES case)
