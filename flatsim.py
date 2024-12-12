@@ -287,10 +287,15 @@ class flatsim(object):
             self.lon_radar = ds.GetRasterBand(1).ReadAsArray()
             self.lat_radar = ds.GetRasterBand(2).ReadAsArray()
 
+
             os.remove('lonlat_file.unw')
             os.remove('lonlat_file.unw.rsc')
 
         ##################
+
+        # Put 0 as NaNs
+        self.lon_radar[self.lon_radar==0.] = np.nan
+        self.lat_radar[self.lat_radar==0.] = np.nan
 
         if plot:
             fig, axs = plt.subplots(1, 2, sharey=True)#, figsize=(8,4))
