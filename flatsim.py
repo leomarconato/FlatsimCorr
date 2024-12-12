@@ -287,7 +287,8 @@ class flatsim(object):
             self.lon_radar = ds.GetRasterBand(1).ReadAsArray()
             self.lat_radar = ds.GetRasterBand(2).ReadAsArray()
 
-            os.remove('lonlat_file.unw', 'lonlat_file.unw.rsc')
+            os.remove('lonlat_file.unw')
+            os.remove('lonlat_file.unw.rsc')
 
         ##################
 
