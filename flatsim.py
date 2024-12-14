@@ -272,7 +272,7 @@ class flatsim(object):
         self.lon_radar = ds.GetRasterBand(1).ReadAsArray()
         self.lat_radar = ds.GetRasterBand(2).ReadAsArray()
 
-        # Check there is data
+        # Check if there is data
         if np.nanstd(self.lon_radar) < 1e-2 or np.nanstd(self.lat_radar) < 1e-2:
             print('The LUT file seem corrupted: we use lonlat_file.rmg')
 
@@ -286,7 +286,6 @@ class flatsim(object):
             ds = gdal.Open('lonlat_file.unw', gdal.GA_ReadOnly)
             self.lon_radar = ds.GetRasterBand(1).ReadAsArray()
             self.lat_radar = ds.GetRasterBand(2).ReadAsArray()
-
 
             os.remove('lonlat_file.unw')
             os.remove('lonlat_file.unw.rsc')
