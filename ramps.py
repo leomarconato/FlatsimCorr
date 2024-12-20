@@ -23,7 +23,6 @@ plt.rcParams['figure.figsize'] = [8,5]
 plt.rcParams['figure.dpi'] = 300
 
 class ramps(object):
-
     '''
     Args:
         * name      : Name of the FLATSIM dataset (e.g. A059SUD or D137NORD)
@@ -432,7 +431,7 @@ class ramps(object):
                 modeldir = 'iono_igs'
                 modelkey = model[4:]
             else:
-                modeldir = 'iono_'+model.lower().replace('2', '')
+                modeldir = 'iono_'+model.lower().replace('2', '').replace('3', '') # TEMPORARY !!!
                 modelkey = model
             
             az_file = os.path.join(os.path.join(self.savedir, modeldir, f'list_ramp_az_{model}.txt'))
@@ -528,7 +527,6 @@ class ramps(object):
         self.ra_ramps['Iono median'] = np.nanmedian(all_ra_ramps, axis=0)
         self.az_ramps['Iono median'] = np.nanmedian(all_az_ramps, axis=0)
 
-    
     def analysisIonoSET(self, plot=False, saveplot=False, models=None, itrf_ra=None, itrf_az=None, min_date=None, max_date=None):
         '''
         Computes and plot the time-series of (range ans azimuth) ramps:
