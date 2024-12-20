@@ -1100,6 +1100,39 @@ class flatsim(object):
             plt.colorbar(label='IPS (rad)')
 
         return ips
+    
+    def Tec2Ips3(self, E, skip_res=1, hIPP=400, wavelength=0.0556, top_iono=0.9, plot=False):
+        '''
+        Compute the Ionospheric Phase Screen from a TEC map.
+        Implementation of the mapping function of Yunjun et al. (2022).
+
+        Args:
+            * E         : TEC array (in TECU)
+
+        Kwargs:
+            * wavelength : radar wavelength (default, Sentinel-1)
+            * top_iono   : factor to compensate for the top-side part of the ionosphere
+            * plot       : plot the TEC map
+
+        Returns:
+            * Phase array of the size of E, contining the ionospheric phase
+        '''
+
+        K = 40.28                 # Appelton–Hartree equation constant
+        c = 299792458             # Speed of light
+        f = c/wavelength
+        Re = 6371
+
+        thetaIPP = np.arcsin(Re*np.sin(np.radians(self.incidence[::skip_res,::skip_res]))/(Re+hIPP))
+
+        ips = - 4 * np.pi * K / (c*f) * top_iono * E * 10**(16) * 1/np.cos(thetaIPP)
+
+        if plot:
+            plt.figure()
+            plt.imshow(self.wrap(ips), cmap='jet', vmin=-np.pi, vmax=np.pi)
+            plt.colorbar(label='IPS (rad)')
+
+        return ips
 
     def fitPhaseRamp(self, phase, skip_res=1, plot=False):
         '''
@@ -1143,6 +1176,8 @@ class flatsim(object):
         return C[1]/skip_res, C[0]/skip_res, sigma
 
 ###############################################
+
+### Basic mapping function
 
     def computeTecRampsRGP(self, skip_res=100):
         '''
@@ -1464,6 +1499,8 @@ class flatsim(object):
 
         return
     
+### Yunjun mapping function
+
     def computeTecRampsRGP2(self, skip_res=100):
         '''
         Compute ramps due to TEC from the RGP IONEX model (centered on France)
@@ -1782,6 +1819,331 @@ class flatsim(object):
             # Save SIGMA
             header = f'date_decyr sigma date'
             file = os.path.join(self.local_jpld_dir, f'list_ramp_sigma_JPLD2.txt')
+            arr = np.c_[ self.dates_decyr, self.ramp_sig_jpld, self.dates ].astype(float)
+            np.savetxt(file, arr, fmt='%.6f % .7e % 6d')
+
+        return
+
+### Yunjun mapping function without refraction
+
+    def computeTecRampsRGP3(self, skip_res=100):
+        '''
+        Compute ramps due to TEC from the RGP IONEX model (centered on France)
+        /!\ New mapping function with only change if incidence angle at IPP (no refraction)
+        
+        Kwargs:
+            * skip_res   : decimation factor in range and azimuth (default, 100)
+
+        Returns:
+            * None
+        '''
+
+        self.getAcquisitionTime()
+        self.getLatLon()
+        self.getIncidence()
+
+        if self.verbose:
+            print("\n---------------------------------")
+            print(f"    Computing ionospheric ramps with RGP TEC model")
+            
+        if self.verbose:
+            print(f"\n        Fetch RGP TEC data for all dates...")
+
+        num_prod = []
+        for date in tqdm(self.dates):
+            
+            self.downloadTecRGP(date)
+            num_prod.append(len(self.rgp_files[date]))
+
+        num_prod = np.array(num_prod)
+        
+        if np.count_nonzero(num_prod) < self.Ndates:
+            print(f'            -> {self.Ndates-np.count_nonzero(num_prod)} out of {self.Ndates} have no TEC data on the RGP repository')
+
+        if np.count_nonzero(num_prod==1) > 0:
+            print(f'            -> {np.count_nonzero(num_prod==1)} out of {self.Ndates} have data for only one time step on the RGP repository')
+    
+        if np.count_nonzero(num_prod) == self.Ndates:
+            print(f'            -> All dates have data for both times steps on the RGP repository')
+
+        if self.verbose:
+            print(f"\n        Compute IPP coordinates...")
+
+        self.ground2IPP(plot=False, saveplot=True)
+
+        if self.verbose:
+            print(f"\n        Compute TEC maps and fit ramps for all dates...")
+
+        self.ramp_az_rgp = np.zeros(self.Ndates)
+        self.ramp_ra_rgp = np.zeros(self.Ndates)
+        self.ramp_sig_rgp = np.zeros(self.Ndates)
+
+        for i in tqdm(range(self.Ndates)):
+            date = self.dates[i]
+
+            if num_prod[i] > 0:
+
+                # Get the TEC 
+                tec = self.computeTecRGP(date, skip_res=skip_res, plot=False, saveplot=False)
+
+                # Then convert to phase
+                ips = self.Tec2Ips3(tec, skip_res=skip_res)
+
+                # Then fit ramps
+                self.ramp_az_rgp[i], self.ramp_ra_rgp[i], self.ramp_sig_rgp[i] = self.fitPhaseRamp(ips, skip_res=skip_res)
+
+        # Put zeros to nan
+        self.ramp_az_rgp[self.ramp_az_rgp == 0.] = np.nan
+        self.ramp_ra_rgp[self.ramp_ra_rgp == 0.] = np.nan
+        self.ramp_sig_rgp[self.ramp_sig_rgp == 0.] = np.nan
+        
+        # Reference with first date
+        if self.ramp_az_rgp[0] != np.nan:
+            self.ramp_az_rgp -= self.ramp_az_rgp[0]
+            self.ramp_ra_rgp -= self.ramp_ra_rgp[0]
+        else:
+            sys.exit('Ramp of first date is NaN, reference in another way...')
+
+        # Save AZIMUTH ramps
+        header = f'date_decyr az_ramp / number_of_products date'
+        file = os.path.join(self.local_rgp_dir, f'list_ramp_az_RGP3.txt')
+        arr = np.c_[ self.dates_decyr, self.ramp_az_rgp, np.zeros(self.Ndates), num_prod, self.dates ].astype(float)
+        np.savetxt(file, arr, fmt='%.6f % .7e % .7e %  2i % 6d', header=header)
+
+        # Save RANGE ramps
+        header = f'date_decyr ra_ramp / number_of_products date'
+        file = os.path.join(self.local_rgp_dir, f'list_ramp_ra_RGP3.txt')
+        arr = np.c_[ self.dates_decyr, self.ramp_ra_rgp, np.zeros(self.Ndates), num_prod, self.dates ].astype(float)
+        np.savetxt(file, arr, fmt='%.6f % .7e % .7e %  2i % 6d', header=header)
+
+        # Save SIGMA
+        header = f'date_decyr sigma date'
+        file = os.path.join(self.local_rgp_dir, f'list_ramp_sigma_RGP3.txt')
+        arr = np.c_[ self.dates_decyr, self.ramp_sig_rgp, self.dates ].astype(float)
+        np.savetxt(file, arr, fmt='%.6f % .7e % 6d')
+
+        return
+
+    def computeTecRampsIGS3(self, skip_res=100, model='IGS'):
+        '''
+        Compute ramps due to TEC from different GIMs compiled by IGS.
+        /!\ New mapping function with only change if incidence angle at IPP (no refraction)
+        
+        Kwargs:
+            * model      : model to used: IGS, JPL, CODE, ESA, UPC (default, IGS)
+            * skip_res   : decimation factor in range and azimuth (default, 100)
+
+        Returns:
+            * None
+        '''
+
+        self.getAcquisitionTime()
+        self.getLatLon()
+        self.getIncidence()
+
+        if self.verbose:
+            print("\n---------------------------------")
+            print(f"    Computing ionospheric ramps with IGS TEC model")
+            
+        if self.verbose:
+            print(f"\n        Fetch IGS TEC data for all dates...")
+
+        num_prod = []
+        for date in tqdm(self.dates):
+            
+            self.downloadTecIGS(date)
+            num_prod.append(len(self.igs_files[date]))
+
+        num_prod = np.array(num_prod)
+        
+        if np.count_nonzero(num_prod) < self.Ndates:
+            print(f'            -> {self.Ndates-np.count_nonzero(num_prod)} out of {self.Ndates} have no TEC data on the IGS repository')
+        else:
+            print(f'            -> All dates have TEC data on the IGS repository')
+
+        if self.verbose:
+            print(f"\n        Compute IPP coordinates taking in to account the Earth's rotation...")
+
+        self.ground2IPP(time_shifts='igs', plot=False, saveplot=True)
+
+        if self.verbose:
+            print(f"\n        Compute TEC maps and fit ramps for all dates...")
+
+        if not hasattr(self, 'ramp_az_igs'):
+            self.ramp_az_igs = {}
+        if not hasattr(self, 'ramp_ra_igs'):
+            self.ramp_ra_igs = {}
+        if not hasattr(self, 'ramp_sig_igs'):
+            self.ramp_sig_igs = {}
+        
+        self.ramp_az_igs[model] = np.zeros(self.Ndates)
+        self.ramp_ra_igs[model] = np.zeros(self.Ndates)
+        self.ramp_sig_igs[model] = np.zeros(self.Ndates)
+
+        for i in tqdm(range(self.Ndates)):
+            date = self.dates[i]
+
+            if num_prod[i] > 0:
+
+                # Get the TEC 
+                tec = self.computeTecIGS(date, model=model, skip_res=skip_res, plot=False, saveplot=False)
+
+                if tec is None:
+                    self.ramp_az_igs[model][i] = np.nan
+                    self.ramp_ra_igs[model][i] = np.nan
+                    self.ramp_sig_igs[model][i] = np.nan
+
+                else:
+                    # Then convert to phase
+                    ips = self.Tec2Ips3(tec, skip_res=skip_res)
+
+                    # Then fit ramps
+                    self.ramp_az_igs[model][i], self.ramp_ra_igs[model][i], self.ramp_sig_igs[model][i] = self.fitPhaseRamp(ips, skip_res=skip_res)
+
+        # Put zeros to nan
+        self.ramp_az_igs[model][self.ramp_az_igs == 0.] = np.nan
+        self.ramp_ra_igs[model][self.ramp_ra_igs == 0.] = np.nan
+        self.ramp_sig_igs[model][self.ramp_sig_igs == 0.] = np.nan
+        
+        # Reference with first date
+        if self.ramp_az_igs[model][0] != np.nan:
+            self.ramp_az_igs[model] -= self.ramp_az_igs[model][0]
+            self.ramp_ra_igs[model] -= self.ramp_ra_igs[model][0]
+        else:
+            sys.exit('Ramp of first date is NaN, reference in another way...')
+
+        if np.isnan(self.ramp_az_igs[model]).all() or np.isnan(self.ramp_ra_igs[model]).all():
+            if self.verbose:
+                print(f"\n        No TEC data in the files for {model} model, no ramps computed")
+
+        else:
+            # Save AZIMUTH ramps
+            header = f'date_decyr az_ramp / number_of_products date'
+            file = os.path.join(self.local_igs_dir, f'list_ramp_az_IGS_{model}3.txt')
+            arr = np.c_[ self.dates_decyr, self.ramp_az_igs[model], np.zeros(self.Ndates), num_prod, self.dates ].astype(float)
+            np.savetxt(file, arr, fmt='%.6f % .7e % .7e %  2i % 6d', header=header)
+
+            # Save RANGE ramps
+            header = f'date_decyr ra_ramp / number_of_products date'
+            file = os.path.join(self.local_igs_dir, f'list_ramp_ra_IGS_{model}3.txt')
+            arr = np.c_[ self.dates_decyr, self.ramp_ra_igs[model], np.zeros(self.Ndates), num_prod, self.dates ].astype(float)
+            np.savetxt(file, arr, fmt='%.6f % .7e % .7e %  2i % 6d', header=header)
+
+            # Save SIGMA
+            header = f'date_decyr sigma date'
+            file = os.path.join(self.local_igs_dir, f'list_ramp_sigma_IGS_{model}3.txt')
+            arr = np.c_[ self.dates_decyr, self.ramp_sig_igs[model], self.dates ].astype(float)
+            np.savetxt(file, arr, fmt='%.6f % .7e % 6d')
+
+        return
+
+    def computeTecRampsJPLD3(self, skip_res=100):
+        '''
+        Compute ramps due to TEC from the JPLD research GIM (1°, 15' resolution).
+        /!\ New mapping function with only change if incidence angle at IPP (no refraction)
+        
+        Kwargs:
+            * skip_res   : decimation factor in range and azimuth (default, 100)
+
+        Returns:
+            * None
+        '''
+
+        self.getAcquisitionTime()
+        self.getLatLon()
+        self.getIncidence()
+
+        if self.verbose:
+            print("\n---------------------------------")
+            print(f"    Computing ionospheric ramps with JPLD TEC model")
+            
+        if self.verbose:
+            print(f"\n        Fetch JPLD TEC data for all dates...")
+
+        num_prod = []
+        for date in tqdm(self.dates):
+            
+            self.downloadTecJPLD(date)
+            num_prod.append(len(self.jpld_files[date]))
+
+        num_prod = np.array(num_prod)
+        
+        if np.count_nonzero(num_prod) < self.Ndates:
+            print(f'            -> {self.Ndates-np.count_nonzero(num_prod)} out of {self.Ndates} have no TEC data on the JPLD repository')
+        else:
+            print(f'            -> All dates have TEC data on the JPLD repository')
+
+        if self.verbose:
+            print(f"\n        Compute IPP coordinates taking in to account the Earth's rotation...")
+
+        self.ground2IPP(time_shifts='jpld', plot=False, saveplot=True)
+
+        if self.verbose:
+            print(f"\n        Compute TEC maps and fit ramps for all dates...")
+
+        if not hasattr(self, 'ramp_az_jpld'):
+            self.ramp_az_jpld = {}
+        if not hasattr(self, 'ramp_ra_jpld'):
+            self.ramp_ra_jpld = {}
+        if not hasattr(self, 'ramp_sig_jpld'):
+            self.ramp_sig_jpld = {}
+        
+        self.ramp_az_jpld = np.zeros(self.Ndates)
+        self.ramp_ra_jpld = np.zeros(self.Ndates)
+        self.ramp_sig_jpld = np.zeros(self.Ndates)
+
+        for i in tqdm(range(self.Ndates)):
+            date = self.dates[i]
+
+            if num_prod[i] > 0:
+
+                # Get the TEC 
+                tec = self.computeTecJPLD(date, skip_res=skip_res, plot=False, saveplot=False)
+
+                if tec is None:
+                    self.ramp_az_jpld[i] = np.nan
+                    self.ramp_ra_jpld[i] = np.nan
+                    self.ramp_sig_jpld[i] = np.nan
+
+                else:
+                    # Then convert to phase
+                    ips = self.Tec2Ips3(tec, skip_res=skip_res)
+
+                    # Then fit ramps
+                    self.ramp_az_jpld[i], self.ramp_ra_jpld[i], self.ramp_sig_jpld[i] = self.fitPhaseRamp(ips, skip_res=skip_res)
+
+        # Put zeros to nan
+        self.ramp_az_jpld[self.ramp_az_jpld == 0.] = np.nan
+        self.ramp_ra_jpld[self.ramp_ra_jpld == 0.] = np.nan
+        self.ramp_sig_jpld[self.ramp_sig_jpld == 0.] = np.nan
+        
+        # Reference with first date
+        if self.ramp_az_jpld[0] != np.nan:
+            self.ramp_az_jpld -= self.ramp_az_jpld[0]
+            self.ramp_ra_jpld -= self.ramp_ra_jpld[0]
+        else:
+            sys.exit('Ramp of first date is NaN, reference in another way...')
+
+        if np.isnan(self.ramp_az_jpld).all() or np.isnan(self.ramp_ra_jpld).all():
+            if self.verbose:
+                print(f"\n        No TEC data in the files, no ramps computed")
+
+        else:
+            # Save AZIMUTH ramps
+            header = f'date_decyr az_ramp / number_of_products date'
+            file = os.path.join(self.local_jpld_dir, f'list_ramp_az_JPLD3.txt')
+            arr = np.c_[ self.dates_decyr, self.ramp_az_jpld, np.zeros(self.Ndates), num_prod, self.dates ].astype(float)
+            np.savetxt(file, arr, fmt='%.6f % .7e % .7e %  2i % 6d', header=header)
+
+            # Save RANGE ramps
+            header = f'date_decyr ra_ramp / number_of_products date'
+            file = os.path.join(self.local_jpld_dir, f'list_ramp_ra_JPLD3.txt')
+            arr = np.c_[ self.dates_decyr, self.ramp_ra_jpld, np.zeros(self.Ndates), num_prod, self.dates ].astype(float)
+            np.savetxt(file, arr, fmt='%.6f % .7e % .7e %  2i % 6d', header=header)
+
+            # Save SIGMA
+            header = f'date_decyr sigma date'
+            file = os.path.join(self.local_jpld_dir, f'list_ramp_sigma_JPLD3.txt')
             arr = np.c_[ self.dates_decyr, self.ramp_sig_jpld, self.dates ].astype(float)
             np.savetxt(file, arr, fmt='%.6f % .7e % 6d')
 
