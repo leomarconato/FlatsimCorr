@@ -20,6 +20,9 @@ from spacepy import pycdf
 import netCDF4
 import gzip
 
+# Locals
+from . import utils
+
 # Some figure parameters...
 import matplotlib
 if os.environ["TERM"].startswith("screen"): # cluster

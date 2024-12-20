@@ -7,11 +7,14 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import os, sys, glob
-from tqdm import tqdm
+#from tqdm import tqdm
 import datetime
-from scipy.linalg import lstsq
-from scipy.stats import linregress
+#from scipy.linalg import lstsq
+#from scipy.stats import linregress
 #from scipy.signal import lombscargle
+
+# Locals
+from . import utils
 
 # Some figure parameters...
 import matplotlib
@@ -54,6 +57,23 @@ class ramps(object):
             self.possible_iono_models = ['IGS_IGS', 'IGS_JPL', 'IGS_CODE', 'IGS_ESA', 'IGS_UPC', 'JPLD', 'RGP']
         else:
             self.possible_iono_models = gim_list
+
+        self.iono_colors = {}
+        for model in self.possible_iono_models:
+            if '_IGS' in model:
+                self.iono_colors[model] = 'tab:blue'
+            if '_JPL' in model:
+                self.iono_colors[model] = 'tab:purple'
+            if '_CODE' in model:
+                self.iono_colors[model] = 'tab:green'
+            if '_ESA' in model:
+                self.iono_colors[model] = 'tab:orange'
+            if '_UPC' in model:
+                self.iono_colors[model] = 'tab:olive'
+            if 'JPLD' in model:
+                self.iono_colors[model] = 'tab:pink'
+            if 'RGP' in model:
+                self.iono_colors[model] = 'tab:brown'
 
         if self.verbose:
             print("---------------------------------")
@@ -163,23 +183,6 @@ class ramps(object):
     
 ############################################################
 
-    def removeOutliers(self, ramps, sigma=10.):
-            median = np.nanmedian(ramps)
-            std = np.nanstd(ramps)
-            outliers = (np.abs(ramps-median) > sigma*std)
-            Noutliers = np.count_nonzero(outliers)
-            if self.verbose and Noutliers>0:
-                print(f'       {np.count_nonzero(outliers)} outliers found for azimuth ramps')
-            ramps[np.abs(ramps-median) > sigma*std] = np.nan
-            return ramps
-
-    def sliding_median(self, x, y, window=0.3):
-        y_filt = np.zeros_like(y)
-        for i in range(len(x)):
-            sel = np.logical_and(x > x[i]-window/2, x < x[i]+window/2)
-            y_filt[i] = np.nanmedian(y[sel])
-        return y_filt
-
     def loadDataRamps(self, remove_outliers=False, sig_thres=20., zero_median=False, plot=False):
         '''
         Read (and plot) the files containing the (az and ra) ramps inverted before the time-series inversion.
@@ -227,8 +230,8 @@ class ramps(object):
         self.ra_ramps['Data'][self.sig_ramp_inv > sig_thres] = np.nan
 
         if remove_outliers:
-            self.az_ramps['Data'] = self.removeOutliers(self.az_ramps['Data'], sigma=remove_outliers)
-            self.ra_ramps['Data'] = self.removeOutliers(self.ra_ramps['Data'], sigma=remove_outliers)
+            self.az_ramps['Data'] = utils.remove_outliers(self.az_ramps['Data'], sigma=remove_outliers)
+            self.ra_ramps['Data'] = utils.remove_outliers(self.ra_ramps['Data'], sigma=remove_outliers)
 
         if zero_median:
             self.az_ramps['Data'] -= np.nanmedian(self.az_ramps['Data'])
@@ -295,8 +298,8 @@ class ramps(object):
         self.ra_ramps['Data'][self.sig_ramp_inv > sig_thres] = np.nan
 
         if remove_outliers:
-            self.az_ramps['Data'] = self.removeOutliers(self.az_ramps['Data'], sigma=remove_outliers)
-            self.ra_ramps['Data'] = self.removeOutliers(self.ra_ramps['Data'], sigma=remove_outliers)
+            self.az_ramps['Data'] = utils.remove_outliers(self.az_ramps['Data'], sigma=remove_outliers)
+            self.ra_ramps['Data'] = utils.remove_outliers(self.ra_ramps['Data'], sigma=remove_outliers)
 
         if zero_median:
             self.az_ramps['Data'] -= np.nanmedian(self.az_ramps['Data'])
@@ -367,8 +370,8 @@ class ramps(object):
                 self.ra_ramps['SET'] = ra_set_temp
 
             if remove_outliers:
-                self.az_ramps['SET'] = self.removeOutliers(self.az_ramps['SET'], sigma=remove_outliers)
-                self.ra_ramps['SET'] = self.removeOutliers(self.ra_ramps['SET'], sigma=remove_outliers)
+                self.az_ramps['SET'] = utils.remove_outliers(self.az_ramps['SET'], sigma=remove_outliers)
+                self.ra_ramps['SET'] = utils.remove_outliers(self.ra_ramps['SET'], sigma=remove_outliers)
 
             if zero_median:
                 self.az_ramps['SET'] -= np.nanmedian(self.az_ramps['SET'])
@@ -455,9 +458,9 @@ class ramps(object):
                     #print(f"   /!\ {len(idx)} dates removed from iono (doesn't exist in data)")
 
                 if remove_outliers:
-                    self.az_ramps[modelkey]= self.removeOutliers(self.az_ramps[modelkey], sigma=remove_outliers)
-                    self.ra_ramps[modelkey] = self.removeOutliers(self.ra_ramps[modelkey], sigma=remove_outliers)
-                    self.sig_ramps[modelkey] = self.removeOutliers(self.sig_ramps[modelkey], sigma=10)
+                    self.az_ramps[modelkey]= utils.remove_outliers(self.az_ramps[modelkey], sigma=remove_outliers)
+                    self.ra_ramps[modelkey] = utils.remove_outliers(self.ra_ramps[modelkey], sigma=remove_outliers)
+                    self.sig_ramps[modelkey] = utils.remove_outliers(self.sig_ramps[modelkey], sigma=10)
 
                 if zero_median:
                     self.az_ramps[modelkey] -= np.nanmedian(self.az_ramps[modelkey])
@@ -482,7 +485,7 @@ class ramps(object):
 
         return
     
-    def computeIonoMedian(self, model=None):
+    def computeIonoMedian(self, models=None):
         '''
         Compute the median of all (default) or a selection of GIM-derived ramps.
 
@@ -493,30 +496,27 @@ class ramps(object):
             * None
         '''
 
-        if model is not None:
-            if not isinstance(model, list):    # Check if one or more models are asked
-                model = [model]
-            if not set(model).issubset(self.possible_iono_models): 
+        if models is not None:
+            if not isinstance(models, list):    # Check if one or more models are asked
+                models = [models]
+            if not set(models).issubset(self.possible_iono_models): 
                 sys.exit('Asked ionospheric models are not supported')
         else:                              # Do all models
-            model = self.possible_iono_models
+            models = self.possible_iono_models
 
-        print('Median computed on: ', model)
+        #print('Median computed on: ', models)
 
-        all_ra_ramps = np.zeros((len(model), self.Ndates))
-        all_az_ramps = np.zeros((len(model), self.Ndates))
+        all_ra_ramps = np.zeros((len(models), self.Ndates))
+        all_az_ramps = np.zeros((len(models), self.Ndates))
 
-        for i in range(len(model)):
-            if model[i].startswith('IGS'):
-                modelkey = model[i][4:]
-            else:
-                modelkey = model[i]
+        for i in range(len(models)):
+            modelkey = utils.iono2key(models[i])
 
             if modelkey in list(self.ra_ramps.keys()):
                 all_ra_ramps[i,:] = self.ra_ramps[modelkey]
             else:
                 all_ra_ramps[i,:] = np.nan
-            if modelkey in list(self.ra_ramps.keys()):
+            if modelkey in list(self.az_ramps.keys()):
                 all_az_ramps[i,:] = self.az_ramps[modelkey]
             else:
                 all_az_ramps[i,:] = np.nan
@@ -568,6 +568,16 @@ class ramps(object):
         sigmas = {}
         #r_squared = {}
 
+        modelkeys = []
+        colors = []
+        for model in models:
+            temp_key = utils.iono2key(model)
+            if temp_key in list(self.ra_ramps.keys()):
+                modelkeys.append(temp_key)
+                colors.append(self.iono_colors[model])
+                R['Range'][temp_key] = self.ra_ramps[temp_key]
+                R['Azimuth'][temp_key] = self.az_ramps[temp_key]
+
         for type in ['Range', 'Azimuth']:
             dicR = R[type]
 
@@ -579,15 +589,15 @@ class ramps(object):
             axs[0,0].plot(self.dates_decyr, dicR['SET'], c='r', linewidth=1, alpha=0.8, label='SET')
 
             axs[1,0].plot(self.dates_decyr, dicR['Data']-dicR['SET'], c='k', linewidth=0.5, ls=':', label='Data - SET')
-            filtered = self.sliding_median(self.dates_decyr, dicR['Data']-dicR['SET'])
+            filtered = utils.sliding_median(self.dates_decyr, dicR['Data']-dicR['SET'])
             axs[1,0].plot(self.dates_decyr, filtered, c='k', linewidth=1, label='Data - SET filtered')
 
-            for i in range(len(models)):
-                axs[1,0].plot(self.dates_decyr, dicR['IONO'][i,:], linewidth=1, alpha=0.8, label=models[i])
+            for i in range(len(modelkeys)):
+                axs[1,0].plot(self.dates_decyr, dicR[modelkeys[i]], linewidth=1, alpha=0.8, label=modelkeys[i], color=colors[i])
             
             corrected = (dicR['Data'] - dicR['SET'] - dicR['IONO median']) # with median of iono models
-            cst, vel = self.linear_fit(self.dates_decyr, corrected, min_date=min_date, max_date=max_date)
-            cst2, vel2, sin, cos = self.linear_seasonal_fit(self.dates_decyr, corrected, min_date=min_date, max_date=max_date)
+            cst, vel = utils.linear_fit(self.dates_decyr, corrected, min_date=min_date, max_date=max_date)
+            cst2, vel2, sin, cos = utils.linear_seasonal_fit(self.dates_decyr, corrected, min_date=min_date, max_date=max_date)
             fit = cst+self.dates_decyr*vel
             fit2 = cst2+self.dates_decyr*vel2+sin*np.sin(2*np.pi*self.dates_decyr)+cos*np.cos(2*np.pi*self.dates_decyr)
             axs[2,0].plot(self.dates_decyr, corrected, c='k', linewidth=0.5, label='Data - SET - IONO (median)')
@@ -604,9 +614,9 @@ class ramps(object):
 
             axs[0,1].scatter(dicR['Data'], dicR['SET'], marker='.', linewidth=0, s=10, color='r')
 
-            for i in range(len(models)):    
-                #axs[1,1].scatter(dicR['Data']-dicR['SET'], dicR['IONO'][i,:], marker='.', linewidth=0, s=10, alpha=0.4)
-                axs[1,1].scatter(filtered, dicR['IONO'][i,:], marker='.', linewidth=0, s=10, alpha=0.4)
+            for i in range(len(modelkeys)):
+                #axs[1,1].scatter(dicR['Data']-dicR['SET'], dicR[models[i]], marker='.', linewidth=0, s=10, alpha=0.4)
+                axs[1,1].scatter(filtered, dicR[modelkeys[i]], marker='.', linewidths=0, s=10, alpha=0.4, color=colors[i])
 
             axs[2,1].hist(corrected-fit, bins=11, color='tab:orange', alpha=0.6)
             axs[2,1].hist(corrected-fit2, bins=11, color='gold', alpha=0.6)
@@ -639,19 +649,18 @@ class ramps(object):
             axs[2, 1].set_ylabel('N')
 
             ### Indicate R2 ###
-            r_val1 = self.R2(dicR['Data'], dicR['SET'])
+            r_val1 = utils.R2(dicR['Data'], dicR['SET'])
             axs[0, 1].text(0.95, 0.05, f"$R^2$ = {r_val1:.2f}", transform=axs[0, 1].transAxes, va='bottom', ha='right')
-            r_val2 = self.R2(filtered, dicR['IONO median'])
+            r_val2 = utils.R2(filtered, dicR['IONO median'])
             axs[1, 1].text(0.95, 0.05, f"$R^2$ = {r_val2:.2f}", transform=axs[1, 1].transAxes, va='bottom', ha='right')
 
             ### Indicate RMSE ###
-            axs[0, 1].text(0.05, 0.95, f"RMSE = \n{self.RMSE(dicR['Data']-dicR['SET']):.2e}", transform=axs[0, 1].transAxes, va='top')
-            axs[1, 1].text(0.05, 0.95, f"RMSE = \n{self.RMSE(filtered-dicR['IONO median']):.2e}", transform=axs[1, 1].transAxes, va='top')
-            #axs[2, 1].text(0.05, 0.95, f"RMSE = \n{self.RMSE(corrected-fit):.2e}", transform=axs[2, 1].transAxes, va='top')
+            axs[0, 1].text(0.05, 0.95, f"RMSE = \n{utils.RMSE(dicR['Data']-dicR['SET']):.2e}", transform=axs[0, 1].transAxes, va='top')
+            axs[1, 1].text(0.05, 0.95, f"RMSE = \n{utils.RMSE(filtered-dicR['IONO median']):.2e}", transform=axs[1, 1].transAxes, va='top')
+            #axs[2, 1].text(0.05, 0.95, f"RMSE = \n{utils.RMSE(corrected-fit):.2e}", transform=axs[2, 1].transAxes, va='top')
             axs[2, 1].text(0.05, 0.95, f"RMSE =", transform=axs[2, 1].transAxes, va='top')
-            axs[2, 1].text(0.05, 0.85, f"{self.RMSE(corrected-fit):.2e}", color="tab:orange", weight='bold', transform=axs[2, 1].transAxes, va='top')
-            axs[2, 1].text(0.05, 0.75, f"{self.RMSE(corrected-fit2):.2e}", color="gold", weight='bold', transform=axs[2, 1].transAxes, va='top')
-
+            axs[2, 1].text(0.05, 0.85, f"{utils.RMSE(corrected-fit):.2e}", color="tab:orange", weight='bold', transform=axs[2, 1].transAxes, va='top')
+            axs[2, 1].text(0.05, 0.75, f"{utils.RMSE(corrected-fit2):.2e}", color="gold", weight='bold', transform=axs[2, 1].transAxes, va='top')
 
             fig.suptitle(f'{self.name} - {type} ramps', weight='bold')
             plt.tight_layout()
@@ -668,12 +677,12 @@ class ramps(object):
             sigmas[type] = [np.nanstd(dicR['Data']), np.nanstd(dicR['Data']-dicR['SET']), np.nanstd(corrected), np.nanstd(corrected-fit), np.nanstd(corrected-fit2)]
             
             # Save R2
-            #r_squared[type] = [self.R2(self.dates_decyr, dicR['Data']), self.R2(self.dates_decyr, dicR['Data']-dicR['SET']), self.R2(self.dates_decyr, corrected), self.R2(self.dates_decyr, corrected-fit)]
+            #r_squared[type] = [utils.R2(self.dates_decyr, dicR['Data']), utils.R2(self.dates_decyr, dicR['Data']-dicR['SET']), utils.R2(self.dates_decyr, corrected), utils.R2(self.dates_decyr, corrected-fit)]
             
             # Save rates
             rates[type] = np.zeros(4)
-            _, rates[type][0] = self.linear_fit(self.dates_decyr, dicR['Data'], min_date=min_date, max_date=max_date)
-            _, rates[type][1] = self.linear_fit(self.dates_decyr, dicR['Data']-dicR['SET'], min_date=min_date, max_date=max_date)
+            _, rates[type][0] = utils.linear_fit(self.dates_decyr, dicR['Data'], min_date=min_date, max_date=max_date)
+            _, rates[type][1] = utils.linear_fit(self.dates_decyr, dicR['Data']-dicR['SET'], min_date=min_date, max_date=max_date)
             rates[type][2] = vel
             rates[type][3] = vel2
 
@@ -684,125 +693,140 @@ class ramps(object):
     ################################ UTILS ################################
     #######################################################################
 
-    def linear_fit(self, dates, data0, min_date=None, max_date=None):
-        '''
-        Fit a linear trend in time.
+    # def iono2key(model):
+    #     '''
+    #     Basically remove the IGS suffix if it exists.
 
-        Args:
-            * dates : list or 1d array of time positions
-            * data  : list or 1d array of data to fit (same size as dates)
+    #     Args:
+    #         * model : full name of model (e.g. 'IGS_JPL' or 'JPLD')
         
-        Kwargs:
-            * min_date  : only fit data after this date
-            * max_date  : only fit data before this date
+    #     Returns:
+    #         * The key to access ra_ramps and az_ramps dicts (e.g. 'JPL' or 'JPLD')
+    #     '''
+    #     if model.startswith('IGS'):
+    #         return model[4:]
+    #     else:
+    #         return model
 
-        Returns:
-            * constant, slope
-        '''
-        data = np.copy(data0)
-        if min_date is not None:
-            data[dates<min_date] = np.nan
-        if max_date is not None:
-            data[dates>max_date] = np.nan
+    # def linear_fit(self, dates, data0, min_date=None, max_date=None):
+    #     '''
+    #     Fit a linear trend in time.
 
-        valid = ~np.isnan(data)
-        vel,cst,_,_,_ = linregress(dates[valid], data[valid])
-        return cst, vel
-
-    def linear_seasonal_fit(self, dates, data0, min_date=None, max_date=None):
-        '''
-        Fit a linear trend in time plus a sinusoidal signal of period 1 (year).
-
-        Args:
-            * dates : list or 1d array of time positions
-            * data  : list or 1d array of data to fit (same size as dates)
+    #     Args:
+    #         * dates : list or 1d array of time positions
+    #         * data  : list or 1d array of data to fit (same size as dates)
         
-        Kwargs:
-            * min_date  : only fit data after this date
-            * max_date  : only fit data before this date
+    #     Kwargs:
+    #         * min_date  : only fit data after this date
+    #         * max_date  : only fit data before this date
 
-        Returns:
-            * constant, slope, sin amplitude, cos amplitude
-        '''
-        data = np.copy(data0)
-        if min_date is not None:
-            data[dates<min_date] = np.nan
-        if max_date is not None:
-            data[dates>max_date] = np.nan
+    #     Returns:
+    #         * constant, slope
+    #     '''
+    #     data = np.copy(data0)
+    #     if min_date is not None:
+    #         data[dates<min_date] = np.nan
+    #     if max_date is not None:
+    #         data[dates>max_date] = np.nan
+
+    #     valid = ~np.isnan(data)
+    #     vel,cst,_,_,_ = linregress(dates[valid], data[valid])
+    #     return cst, vel
+
+    # def linear_seasonal_fit(self, dates, data0, min_date=None, max_date=None):
+    #     '''
+    #     Fit a linear trend in time plus a sinusoidal signal of period 1 (year).
+
+    #     Args:
+    #         * dates : list or 1d array of time positions
+    #         * data  : list or 1d array of data to fit (same size as dates)
+        
+    #     Kwargs:
+    #         * min_date  : only fit data after this date
+    #         * max_date  : only fit data before this date
+
+    #     Returns:
+    #         * constant, slope, sin amplitude, cos amplitude
+    #     '''
+    #     data = np.copy(data0)
+    #     if min_date is not None:
+    #         data[dates<min_date] = np.nan
+    #     if max_date is not None:
+    #         data[dates>max_date] = np.nan
             
-        valid = ~np.isnan(data)
-        A = np.c_[np.ones(np.count_nonzero(valid)), dates[valid], np.sin(2*np.pi*dates[valid]), np.cos(2*np.pi*dates[valid])]
-        C,_,_,_ = lstsq(A, data[valid])
+    #     valid = ~np.isnan(data)
+    #     A = np.c_[np.ones(np.count_nonzero(valid)), dates[valid], np.sin(2*np.pi*dates[valid]), np.cos(2*np.pi*dates[valid])]
+    #     C,_,_,_ = lstsq(A, data[valid])
 
-        return C[0], C[1], C[2], C[3]
+    #     return C[0], C[1], C[2], C[3]
 
-    def R2(self, data1, data2):
-        '''
-        Computes the r-squared coefficient (determination coefficient) between two datasets.
+    # def R2(self, data1, data2):
+    #     '''
+    #     Computes the r-squared coefficient (determination coefficient) between two datasets.
 
-        Args:
-            * data1 and data2 : two lists or 1d-array with the same size
+    #     Args:
+    #         * data1 and data2 : two lists or 1d-array with the same size
 
-        Returns:
-            * R^2
-        '''
-        valid = ~np.logical_or(np.isnan(data1), np.isnan(data2))
-        data1_sel = data1[valid]
-        data2_sel = data2[valid]
-        _,_,r_val,_,_ = linregress(data1_sel, data2_sel)
-        return r_val**2
+    #     Returns:
+    #         * R^2
+    #     '''
+    #     valid = ~np.logical_or(np.isnan(data1), np.isnan(data2))
+    #     data1_sel = data1[valid]
+    #     data2_sel = data2[valid]
+    #     _,_,r_val,_,_ = linregress(data1_sel, data2_sel)
+    #     return r_val**2
 
-    def RMSE(self, dif):
-        '''
-        Computes the root-mean-square of the a series.
+    # def RMSE(self, dif):
+    #     '''
+    #     Computes the root-mean-square of the a series.
 
-        Args:
-            * dif : array (e.g., difference between two datasets to compute a proper RMSE)
+    #     Args:
+    #         * dif : array (e.g., difference between two datasets to compute a proper RMSE)
 
-        Returns:
-            * RMSE
-        '''
-        return np.sqrt(np.nanmean(np.square(dif)))
+    #     Returns:
+    #         * RMSE
+    #     '''
+    #     return np.sqrt(np.nanmean(np.square(dif)))
     
-    def detrend(x, y):
-        a = np.c_[x, y]
-        a = a[~np.isnan(a).any(axis=1)]
-        lin, cst = np.polyfit(a[:,0], a[:,1], 1)
-        return y - (cst + np.array(x)*lin)
+    # def detrend(x, y):
+    #     a = np.c_[x, y]
+    #     a = a[~np.isnan(a).any(axis=1)]
+    #     lin, cst = np.polyfit(a[:,0], a[:,1], 1)
+    #     return y - (cst + np.array(x)*lin)
 
-    def correlate(x1, y1, x2, y2, window=30/365):
+    # def correlate(x1, y1, x2, y2, window=30/365):
 
-        # Remove NaNs
-        x1 = x1[~np.isnan(y1)]
-        y1 = y1[~np.isnan(y1)]
-        x2 = x2[~np.isnan(y2)]
-        y2 = y2[~np.isnan(y2)]
+    #     # Remove NaNs
+    #     x1 = x1[~np.isnan(y1)]
+    #     y1 = y1[~np.isnan(y1)]
+    #     x2 = x2[~np.isnan(y2)]
+    #     y2 = y2[~np.isnan(y2)]
 
-        # Keep only common values
-        common_values = np.intersect1d(x1, x2)
-        indices_in_x1 = np.where(np.isin(x1, common_values))[0]
-        indices_in_x2 = np.where(np.isin(x2, common_values))[0]
+    #     # Keep only common values
+    #     common_values = np.intersect1d(x1, x2)
+    #     indices_in_x1 = np.where(np.isin(x1, common_values))[0]
+    #     indices_in_x2 = np.where(np.isin(x2, common_values))[0]
 
-        x1 = x1[indices_in_x1]
-        y1 = y1[indices_in_x1]
-        y2 = y2[indices_in_x2]
+    #     x1 = x1[indices_in_x1]
+    #     y1 = y1[indices_in_x1]
+    #     y2 = y2[indices_in_x2]
 
-        N = len(x1)
-        rho = np.zeros(N)
-        slope = np.zeros(N)
+    #     N = len(x1)
+    #     rho = np.zeros(N)
+    #     slope = np.zeros(N)
 
-        for i in range(N):
-            xmin = x1[i]-window/2
-            xmax = x1[i]+window/2
-            sel = np.logical_and(x1 > xmin, x1 < xmax)
+    #     for i in range(N):
+    #         xmin = x1[i]-window/2
+    #         xmax = x1[i]+window/2
+    #         sel = np.logical_and(x1 > xmin, x1 < xmax)
 
-            if np.count_nonzero(sel) >= 5:
-                rho[i] = np.corrcoef(y1[sel], y2[sel])[0,1]
-                slope[i],_,_,_,_ = linregress(y2[sel], y1[sel])
+    #         if np.count_nonzero(sel) >= 5:
+    #             rho[i] = np.corrcoef(y1[sel], y2[sel])[0,1]
+    #             slope[i],_,_,_,_ = linregress(y2[sel], y1[sel])
 
-        return x1, np.where(rho==0., np.nan, rho), np.where(slope==0., np.nan, slope)
+    #     return x1, np.where(rho==0., np.nan, rho), np.where(slope==0., np.nan, slope)
 
-    def dif_ramps(dict_x, dict_y, data1, data2):
+    # def dif_ramps(dict_x, dict_y, data1, data2):
 
         x1 = dict_x[data1]
         y1 = dict_y[data1]
