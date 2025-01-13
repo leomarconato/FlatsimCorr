@@ -13,7 +13,7 @@ from shapely.geometry import Polygon
 import argparse
 
 #######################
-
+ 
 def calculate_angle(v1, v2):
     dot_product = np.dot(v1, v2)
     norm_product = np.linalg.norm(v1) * np.linalg.norm(v2)
