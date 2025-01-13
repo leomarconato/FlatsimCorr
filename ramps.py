@@ -397,6 +397,80 @@ class ramps(object):
 
         return
     
+    def loadOTLRamps(self, remove_outliers=False, zero_median=False, plot=False):
+        '''
+        Read (and plot) the files containing the (az and ra) ramps computed from a OTL model.
+
+        Kwargs:
+            * remove_outliers : number of standard deviations to filter outliers
+            * zero_median     : center the ramps on zero by removing the median (after removing outliers)
+            * plot     : Plot the ramps and sigma?
+
+        Returns:
+            * None
+        '''
+
+        if self.verbose:
+            print("\n---------------------------------")
+            print("    Look for OTL ramps")
+
+        otl_file = os.path.join(os.path.join(self.ts_dir, f'tilt_otl_range_az.txt'))
+
+        if os.path.isfile(otl_file):
+            otl_dates = list(np.loadtxt(otl_file, usecols=0))
+            Nmissing = self.Ndates - len(otl_dates)
+
+            az_set_temp = np.loadtxt(otl_file, usecols=2)
+            ra_set_temp = np.loadtxt(otl_file, usecols=1)
+
+            if Nmissing > 0:
+                print(f'           -> /!\ {Nmissing} dates with no OTL data')
+
+                self.az_ramps['OTL'] = []
+                self.ra_ramps['OTL'] = []
+
+                for date in self.dates: # Put Nan where no OTL data available
+                    if date in otl_dates:
+                        idx = otl_dates.index(date)
+                        self.az_ramps['OTL'].append(az_set_temp[idx])
+                        self.ra_ramps['OTL'].append(ra_set_temp[idx])
+                            
+                    else:
+                        self.az_ramps['OTL'].append(np.nan)
+                        self.ra_ramps['OTL'].append(np.nan)
+
+            else:
+                self.az_ramps['OTL'] = az_set_temp
+                self.ra_ramps['OTL'] = ra_set_temp
+
+            if remove_outliers:
+                self.az_ramps['OTL'] = utils.remove_outliers(self.az_ramps['OTL'], sigma=remove_outliers)
+                self.ra_ramps['OTL'] = utils.remove_outliers(self.ra_ramps['OTL'], sigma=remove_outliers)
+
+            if zero_median:
+                self.az_ramps['OTL'] -= np.nanmedian(self.az_ramps['OTL'])
+                self.ra_ramps['OTL'] -= np.nanmedian(self.ra_ramps['OTL'])
+
+            if plot:
+                fig, axs = plt.subplots(2, sharex=True)
+
+                axs[0].plot(self.dates_decyr, self.az_ramps['OTL'], c='b', label='Azimuth ramp')
+                axs[1].plot(self.dates_decyr, self.ra_ramps['OTL'], c='r', label='Range ramp')
+
+                #margin = 0.005
+                #axs[0].set_ylim(np.nanpercentile(self.az_ramp_inv, 1)-margin, np.nanpercentile(self.az_ramp_inv, 99)+margin)
+                #axs[1].set_ylim(np.nanpercentile(self.ra_ramp_inv, 1)-margin, np.nanpercentile(self.ra_ramp_inv, 99)+margin)
+
+                [axs[i].legend(frameon=False) for i in range(2)]
+
+                plt.suptitle(self.name+' - OTL', weight='bold')
+                plt.show()
+
+        else:
+            print(f'/!\ {otl_file} not found')
+
+        return
+
     def loadIonoRamps(self, models=None, remove_outliers=False, zero_median=False, plot=False):
         '''
         Read (and plot) the files containing the (az and ra) ramps computed from TEC models.
@@ -500,7 +574,7 @@ class ramps(object):
             if not isinstance(models, list):    # Check if one or more models are asked
                 models = [models]
             if not set(models).issubset(self.possible_iono_models): 
-                sys.exit('Asked ionospheric models are not supported')
+                sys.exit(f'Asked ionospheric models are not supported, choose among: {self.possible_iono_models}')
         else:                              # Do all models
             models = self.possible_iono_models
 
@@ -687,6 +761,167 @@ class ramps(object):
             rates[type][3] = vel2
 
         return rates['Range'], rates['Azimuth'], sigmas['Range'], sigmas['Azimuth']
+    
+    def computeRampRates(self, models=None, min_date=None, max_date=None):
+        '''
+        Computes the ramp rate:
+            - on raw ramp time-series
+            - after correction for Solid Earth Tides (SET) if existing
+            - after correction for Ocean Tide Loadgin (OTL) if existing
+            - after correction for ionosphere (with possibly several TEC models)
+        Ramp rates stored in the self.ra_ramp_rates and self.az_ramp_rates dicts
+
+        Kwargs:
+            * models : list of models to use to compute de median model (if None use self.possible_iono_models)
+            * min_date  : only fit data after this date
+            * max_date  : only fit data before this date
+
+        Returns:
+            * None
+        '''
+
+        if models is None: # Find all the ionospheric models
+            models = self.possible_iono_models
+        elif not isinstance(models, list):
+            sys.exit('Problem with model list')
+
+        # Define dicts for range et azimuth ramps
+        R = {}
+        R['Range'] = {}
+        R['Azimuth'] = {}
+        R['Range']['Data'] = self.ra_ramps['Data']
+        R['Azimuth']['Data'] = self.az_ramps['Data']
+        R['Range']['SET'] = self.ra_ramps['SET']
+        R['Azimuth']['SET'] = self.az_ramps['SET']
+
+        self.computeIonoMedian()
+        R['Range']['IONO median'] = self.ra_ramps['Iono median']
+        R['Azimuth']['IONO median'] = self.az_ramps['Iono median']
+
+        rates = {}
+        sigmas = {}
+        #r_squared = {}
+
+        modelkeys = []
+        colors = []
+        for model in models:
+            temp_key = utils.iono2key(model)
+            if temp_key in list(self.ra_ramps.keys()):
+                modelkeys.append(temp_key)
+                colors.append(self.iono_colors[model])
+                R['Range'][temp_key] = self.ra_ramps[temp_key]
+                R['Azimuth'][temp_key] = self.az_ramps[temp_key]
+
+        for type in ['Range', 'Azimuth']:
+            dicR = R[type]
+
+            fig, axs = plt.subplots(3, 2, sharex='col', width_ratios=[3, 1], figsize=(8,6))
+
+            ### Left: Time-series ###
+
+            axs[0,0].plot(self.dates_decyr, dicR['Data'], c='k', linewidth=0.5, label='Data')
+            axs[0,0].plot(self.dates_decyr, dicR['SET'], c='r', linewidth=1, alpha=0.8, label='SET')
+
+            axs[1,0].plot(self.dates_decyr, dicR['Data']-dicR['SET'], c='k', linewidth=0.5, ls=':', label='Data - SET')
+            filtered = utils.sliding_median(self.dates_decyr, dicR['Data']-dicR['SET'])
+            axs[1,0].plot(self.dates_decyr, filtered, c='k', linewidth=1, label='Data - SET filtered')
+
+            for i in range(len(modelkeys)):
+                axs[1,0].plot(self.dates_decyr, dicR[modelkeys[i]], linewidth=1, alpha=0.8, label=modelkeys[i], color=colors[i])
+            
+            corrected = (dicR['Data'] - dicR['SET'] - dicR['IONO median']) # with median of iono models
+            cst, vel = utils.linear_fit(self.dates_decyr, corrected, min_date=min_date, max_date=max_date)
+            cst2, vel2, sin, cos = utils.linear_seasonal_fit(self.dates_decyr, corrected, min_date=min_date, max_date=max_date)
+            fit = cst+self.dates_decyr*vel
+            fit2 = cst2+self.dates_decyr*vel2+sin*np.sin(2*np.pi*self.dates_decyr)+cos*np.cos(2*np.pi*self.dates_decyr)
+            axs[2,0].plot(self.dates_decyr, corrected, c='k', linewidth=0.5, label='Data - SET - IONO (median)')
+            axs[2,0].plot(self.dates_decyr, fit, c='tab:orange', linewidth=1, alpha=0.8, label=f'Linear fit: {vel:.1e}')
+            axs[2,0].plot(self.dates_decyr, fit2, c='gold', linewidth=1, alpha=0.8, label=f'Linear and seasonal fit: {vel2:.1e}')
+            if itrf_ra is not None and type=='Range':
+                axs[2,0].plot(self.dates_decyr, (self.dates_decyr-self.dates_decyr[int(len(self.dates_decyr)/2)])*itrf_ra, 
+                              c='k', ls='--', linewidth=2, alpha=1, label=f'ITRF: {itrf_ra:.1e}', zorder=0)
+            if itrf_az is not None and type=='Azimuth':
+                axs[2,0].plot(self.dates_decyr, (self.dates_decyr-self.dates_decyr[int(len(self.dates_decyr)/2)])*itrf_az, 
+                              c='k', ls='--', linewidth=2, alpha=1, label=f'ITRF: {itrf_az:.1e}', zorder=0)
+
+            ### Right: Scatter and histo ###
+
+            axs[0,1].scatter(dicR['Data'], dicR['SET'], marker='.', linewidth=0, s=10, color='r')
+
+            for i in range(len(modelkeys)):
+                #axs[1,1].scatter(dicR['Data']-dicR['SET'], dicR[models[i]], marker='.', linewidth=0, s=10, alpha=0.4)
+                axs[1,1].scatter(filtered, dicR[modelkeys[i]], marker='.', linewidths=0, s=10, alpha=0.4, color=colors[i])
+
+            axs[2,1].hist(corrected-fit, bins=11, color='tab:orange', alpha=0.6)
+            axs[2,1].hist(corrected-fit2, bins=11, color='gold', alpha=0.6)
+
+            ### Limits ###
+
+            xmin = min(axs[0,1].get_xlim()[0], axs[1,1].get_ylim()[0])
+            xmax = max(axs[0,1].get_xlim()[1], axs[1,1].get_ylim()[1])
+
+            for i in range(axs.shape[0]):
+                axs[i,1].set_xlim(xmin, xmax)
+                axs[i,0].set_ylim(xmin, xmax)
+                axs[i,1].yaxis.tick_right()
+                axs[i,1].yaxis.set_label_position("right")
+                axs[i,0].set_ylabel('$d\phi/dx$')
+                if i < axs.shape[0]-1: # Only for scatter plots
+                    axs[i,1].set_ylim(xmin, xmax)
+                    axs[i,1].plot([xmin, xmax], [xmin, xmax], ls='--', c='k', lw=1)
+                    axs[i,0].legend(frameon=False, ncols=4)
+                else: # Only for histo
+                    axs[i,1].axvline(ls='--', c='k', lw=1)
+                    axs[i,0].legend(frameon=False, ncols=2)
+
+            ### Scatter and hist axes labels ###
+            axs[0, 1].set_xlabel('$d\phi/dx$ data')
+            axs[0, 1].set_ylabel('$d\phi/dx$ SET')
+            axs[1, 1].set_xlabel('$d\phi/dx$ data - SET filtered')
+            axs[1, 1].set_ylabel('$d\phi/dx$ IONO')
+            axs[2, 1].set_xlabel('$d\phi/dx$ data - SET - IONO - fit')
+            axs[2, 1].set_ylabel('N')
+
+            ### Indicate R2 ###
+            r_val1 = utils.R2(dicR['Data'], dicR['SET'])
+            axs[0, 1].text(0.95, 0.05, f"$R^2$ = {r_val1:.2f}", transform=axs[0, 1].transAxes, va='bottom', ha='right')
+            r_val2 = utils.R2(filtered, dicR['IONO median'])
+            axs[1, 1].text(0.95, 0.05, f"$R^2$ = {r_val2:.2f}", transform=axs[1, 1].transAxes, va='bottom', ha='right')
+
+            ### Indicate RMSE ###
+            axs[0, 1].text(0.05, 0.95, f"RMSE = \n{utils.RMSE(dicR['Data']-dicR['SET']):.2e}", transform=axs[0, 1].transAxes, va='top')
+            axs[1, 1].text(0.05, 0.95, f"RMSE = \n{utils.RMSE(filtered-dicR['IONO median']):.2e}", transform=axs[1, 1].transAxes, va='top')
+            #axs[2, 1].text(0.05, 0.95, f"RMSE = \n{utils.RMSE(corrected-fit):.2e}", transform=axs[2, 1].transAxes, va='top')
+            axs[2, 1].text(0.05, 0.95, f"RMSE =", transform=axs[2, 1].transAxes, va='top')
+            axs[2, 1].text(0.05, 0.85, f"{utils.RMSE(corrected-fit):.2e}", color="tab:orange", weight='bold', transform=axs[2, 1].transAxes, va='top')
+            axs[2, 1].text(0.05, 0.75, f"{utils.RMSE(corrected-fit2):.2e}", color="gold", weight='bold', transform=axs[2, 1].transAxes, va='top')
+
+            fig.suptitle(f'{self.name} - {type} ramps', weight='bold')
+            plt.tight_layout()
+
+            if saveplot:
+                if not os.path.isdir('AnalysisIonoSET'):
+                    os.makedirs('AnalysisIonoSET')
+                plt.savefig(f'AnalysisIonoSET/{self.name}_{type}.png')
+            elif plot:
+                plt.show()
+            plt.close()
+
+            # Save sigmas
+            sigmas[type] = [np.nanstd(dicR['Data']), np.nanstd(dicR['Data']-dicR['SET']), np.nanstd(corrected), np.nanstd(corrected-fit), np.nanstd(corrected-fit2)]
+            
+            # Save R2
+            #r_squared[type] = [utils.R2(self.dates_decyr, dicR['Data']), utils.R2(self.dates_decyr, dicR['Data']-dicR['SET']), utils.R2(self.dates_decyr, corrected), utils.R2(self.dates_decyr, corrected-fit)]
+            
+            # Save rates
+            rates[type] = np.zeros(4)
+            _, rates[type][0] = utils.linear_fit(self.dates_decyr, dicR['Data'], min_date=min_date, max_date=max_date)
+            _, rates[type][1] = utils.linear_fit(self.dates_decyr, dicR['Data']-dicR['SET'], min_date=min_date, max_date=max_date)
+            rates[type][2] = vel
+            rates[type][3] = vel2
+
+        return rates['Range'], rates['Azimuth'], sigmas['Range'], sigmas['Azimuth']
+
     
 
     #######################################################################
