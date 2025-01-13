@@ -81,6 +81,35 @@ def linear_fit(dates, data0, min_date=None, max_date=None):
     vel,cst,_,_,_ = linregress(dates[valid], data[valid])
     return cst, vel
 
+def linear_fit_sigma(dates, data0, min_date=None, max_date=None):
+    '''
+    Fit a linear trend in time.
+
+    Args:
+        * dates : list or 1d array of time positions
+        * data  : list or 1d array of data to fit (same size as dates)
+    
+    Kwargs:
+        * min_date  : only fit data after this date
+        * max_date  : only fit data before this date
+
+    Returns:
+        * constant, slope, sigma
+    '''
+    data = np.copy(data0)
+    if min_date is not None:
+        data[dates<min_date] = np.nan
+    if max_date is not None:
+        data[dates>max_date] = np.nan
+
+    valid = ~np.isnan(data)
+    vel,cst,_,_,_ = linregress(dates[valid], data[valid])
+
+    rmse = np.sqrt(np.mean(np.square(cst+dates[valid]*vel - data[valid])))
+    sigma = rmse/np.sqrt(len(dates[valid]) - 2*np.nanstd(dates[valid]))
+
+    return cst, vel, sigma
+
 def linear_seasonal_fit(dates, data0, min_date=None, max_date=None):
     '''
     Fit a linear trend in time plus a sinusoidal signal of period 1 (year).
@@ -107,6 +136,38 @@ def linear_seasonal_fit(dates, data0, min_date=None, max_date=None):
     C,_,_,_ = lstsq(A, data[valid])
 
     return C[0], C[1], C[2], C[3]
+
+def linear_seasonal_fit_sigma(dates, data0, min_date=None, max_date=None):
+    '''
+    Fit a linear trend in time plus a sinusoidal signal of period 1 (year).
+
+    Args:
+        * dates : list or 1d array of time positions
+        * data  : list or 1d array of data to fit (same size as dates)
+    
+    Kwargs:
+        * min_date  : only fit data after this date
+        * max_date  : only fit data before this date
+
+    Returns:
+        * constant, slope, sin amplitude, cos amplitude, sigma
+    '''
+    data = np.copy(data0)
+    if min_date is not None:
+        data[dates<min_date] = np.nan
+    if max_date is not None:
+        data[dates>max_date] = np.nan
+        
+    valid = ~np.isnan(data)
+    Nvalid = np.count_nonzero(valid)
+    A = np.c_[np.ones(Nvalid), dates[valid], np.sin(2*np.pi*dates[valid]), np.cos(2*np.pi*dates[valid])]
+    C,_,_,_ = lstsq(A, data[valid])
+
+    model = C[0] + dates[valid]*C[1] + np.sin(2*np.pi*dates[valid])*C[2] + np.cos(2*np.pi*dates[valid])*C[3]
+    rmse = np.sqrt(np.mean(np.square(model - data[valid])))
+    sigma = rmse/np.sqrt(Nvalid - 4*np.nanstd(dates[valid]))
+
+    return C[0], C[1], C[2], C[3], sigma
 
 def R2(data1, data2):
     '''
