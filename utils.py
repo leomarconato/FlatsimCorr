@@ -106,7 +106,7 @@ def linear_fit_sigma(dates, data0, min_date=None, max_date=None):
     vel,cst,_,_,_ = linregress(dates[valid], data[valid])
 
     rmse = np.sqrt(np.mean(np.square(cst+dates[valid]*vel - data[valid])))
-    sigma = rmse/np.sqrt(len(dates[valid]) - 2*np.nanstd(dates[valid]))
+    sigma = rmse/(np.sqrt(len(dates[valid]) - 2)*np.nanstd(dates[valid]))
 
     return cst, vel, sigma
 
@@ -165,7 +165,7 @@ def linear_seasonal_fit_sigma(dates, data0, min_date=None, max_date=None):
 
     model = C[0] + dates[valid]*C[1] + np.sin(2*np.pi*dates[valid])*C[2] + np.cos(2*np.pi*dates[valid])*C[3]
     rmse = np.sqrt(np.mean(np.square(model - data[valid])))
-    sigma = rmse/np.sqrt(Nvalid - 4*np.nanstd(dates[valid]))
+    sigma = rmse/(np.sqrt(len(dates[valid]) - 4)*np.nanstd(dates[valid]))
 
     return C[0], C[1], C[2], C[3], sigma
 
