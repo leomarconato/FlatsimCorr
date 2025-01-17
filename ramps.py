@@ -31,26 +31,24 @@ class ramps(object):
         * name      : Name of the FLATSIM dataset (e.g. A059SUD or D137NORD)
 
     Kwargs:
-        * datadir   : directory where to look for the TS and AUX flatsim data (default, current dir)
-        * savedir   : directory where to store computation files and outputs (default, current dir)
-        * utmzone   : UTM zone (optional)
-        * lon0      : Longitude of the utmzone (optional)
-        * lat0      : Latitude of the utmzone (optional)
-        * ellps     : ellipsoid (optional, default='WGS84')
-        * verbose   : optional, default=True)
+        * datadir         : directory where to look for the TS and AUX flatsim data (default, current dir)
+        * savedir         : directory where to store computation files and outputs (default, current dir)
+        * gim_list        : set the list of possible ionospheric models to read
+                                (default, IGS_IGS, IGS_JPL, IGS_CODE, IGS_ESA, IGS_UPC, JPLD, RGP)
+        * wavelength      : wavelength of the radar in meters (default, 0.0556 for Sentinel-1)
+        * look_unw        : multilooking factor of the time-series (default, 8rlks)
+        * convert_to_mmkm : if True, converts all loaded ramps from rad/px to mm/km (default, False)
+                                -> to use it, check wavelength and look_unw are correctly set
+        * verbose         : optional, default=True)
 
     Returns:
         * None
     '''
 
-    def __init__(self, name, datadir='.', savedir='.', gim_list=None, look_unw=8, verbose=True):
+    def __init__(self, name, datadir='.', savedir='.', gim_list=None, wavelength=0.0556, look_unw=8, convert_to_mmkm=False, verbose=True):
 
         self.name = name
         self.verbose = verbose
-        # self.utmzone = utmzone
-        # self.ellps = ellps
-        # self.lon0 = lon0
-        # self.lat0 = lat0
 
         # Select GIM models to consider
         if gim_list==None:
@@ -95,7 +93,17 @@ class ramps(object):
         self.ts_dir = None
         self.aux_dir = None
 
+        self.wavelength = wavelength
         self.look_unw = look_unw
+
+        if convert_to_mmkm:
+            self.ramp_factor = self.wavelength * 1e3/(4*np.pi) * 2150/(self.look_unw/8)/250 
+            self.ramp_unit = 'mm/km'
+        else:
+            self.ramp_factor = 1.
+            self.ramp_unit = 'rad/px'
+        if self.verbose:
+            print('Conversion factor applied on ramps set to', self.ramp_factor)
 
         for dir in dirs:
             if self.name in dir and 'TS' in dir:
@@ -205,7 +213,7 @@ class ramps(object):
         if not os.path.isfile(file_ramp_az_inv):
             sys.exit("list_ramp_az_inverted_img.txt not found")
         else:
-            self.az_ramps['Data'] = np.loadtxt(file_ramp_az_inv, usecols=1)
+            self.az_ramps['Data'] = np.loadtxt(file_ramp_az_inv, usecols=1) * self.ramp_factor
             self.dates = np.loadtxt(file_ramp_az_inv, usecols=-1)     ### /!\ IMPROVE ###
             self.dates_decyr = np.loadtxt(file_ramp_az_inv, usecols=0)      ### /!\ IMPROVE ###
             self.Ndates = len(self.dates_decyr)                             ### /!\ IMPROVE ###
@@ -214,20 +222,20 @@ class ramps(object):
         if not os.path.isfile(file_ramp_ra_inv):
             sys.exit("list_ramp_ra_inverted_img.txt not found")
         else:
-            self.ra_ramps['Data'] = np.loadtxt(file_ramp_ra_inv, usecols=1)
+            self.ra_ramps['Data'] = np.loadtxt(file_ramp_ra_inv, usecols=1) * self.ramp_factor
             
         file_ramp_sigma_inv = os.path.join(self.aux_dir, 'list_ramp_sigma_inverted_img.txt')
         if not os.path.isfile(file_ramp_sigma_inv):
             sys.exit("list_ramp_sigma_inverted_img.txt not found")
         else:
-            self.sig_ramp_inv = np.loadtxt(file_ramp_sigma_inv, usecols=1)
+            self.sig_ramp_inv = np.loadtxt(file_ramp_sigma_inv, usecols=1)  * self.ramp_factor
 
         self.az_ramps['Data'][self.az_ramps['Data'] == 0.] = np.nan
         self.ra_ramps['Data'][self.ra_ramps['Data'] == 0.] = np.nan
         self.sig_ramp_inv[self.sig_ramp_inv == 0.] = np.nan
 
-        self.az_ramps['Data'][self.sig_ramp_inv > sig_thres] = np.nan
-        self.ra_ramps['Data'][self.sig_ramp_inv > sig_thres] = np.nan
+        self.az_ramps['Data'][self.sig_ramp_inv > sig_thres * self.ramp_factor] = np.nan
+        self.ra_ramps['Data'][self.sig_ramp_inv > sig_thres * self.ramp_factor] = np.nan
 
         if remove_outliers:
             self.az_ramps['Data'] = utils.remove_outliers(self.az_ramps['Data'], sigma=remove_outliers)
@@ -277,7 +285,7 @@ class ramps(object):
         if not os.path.isfile(file_ramp_az_inv):
             sys.exit("list_ramp_az_inverted_img_restrict.txt not found")
         else:
-            self.az_ramps['Data'] = np.loadtxt(file_ramp_az_inv, usecols=1)
+            self.az_ramps['Data'] = np.loadtxt(file_ramp_az_inv, usecols=1) * self.ramp_factor
             self.dates = np.loadtxt(file_ramp_az_inv, usecols=-1)     ### /!\ IMPROVE ###
             self.dates_decyr = np.loadtxt(file_ramp_az_inv, usecols=0)      ### /!\ IMPROVE ###
             self.Ndates = len(self.dates_decyr)                             ### /!\ IMPROVE ###
@@ -286,7 +294,7 @@ class ramps(object):
         if not os.path.isfile(file_ramp_ra_inv):
             sys.exit("list_ramp_ra_inverted_img_restrict.txt not found")
         else:
-            self.ra_ramps['Data'] = np.loadtxt(file_ramp_ra_inv, usecols=1)
+            self.ra_ramps['Data'] = np.loadtxt(file_ramp_ra_inv, usecols=1) * self.ramp_factor
             
         self.sig_ramp_inv = np.zeros_like(self.ra_ramps['Data'])
 
@@ -346,8 +354,8 @@ class ramps(object):
             set_dates = list(np.loadtxt(set_file, usecols=0))
             Nmissing = self.Ndates - len(set_dates)
 
-            az_set_temp = np.loadtxt(set_file, usecols=2)
-            ra_set_temp = np.loadtxt(set_file, usecols=1)
+            az_set_temp = np.loadtxt(set_file, usecols=2) * self.ramp_factor
+            ra_set_temp = np.loadtxt(set_file, usecols=1) * self.ramp_factor
 
             if Nmissing > 0:
                 print(f'           -> /!\ {Nmissing} dates with no SET data')
@@ -420,8 +428,8 @@ class ramps(object):
             otl_dates = list(np.loadtxt(otl_file, usecols=0))
             Nmissing = self.Ndates - len(otl_dates)
 
-            az_set_temp = np.loadtxt(otl_file, usecols=2)
-            ra_set_temp = np.loadtxt(otl_file, usecols=1)
+            az_set_temp = np.loadtxt(otl_file, usecols=2) * self.ramp_factor
+            ra_set_temp = np.loadtxt(otl_file, usecols=1) * self.ramp_factor
 
             if Nmissing > 0:
                 print(f'           -> /!\ {Nmissing} dates with no OTL data')
@@ -518,9 +526,9 @@ class ramps(object):
 
             if os.path.isfile(az_file) and os.path.isfile(ra_file) and os.path.isfile(sig_file):
                 
-                self.az_ramps[modelkey] = np.loadtxt(az_file, usecols=1)
-                self.ra_ramps[modelkey] = np.loadtxt(ra_file, usecols=1)
-                self.sig_ramps[modelkey] = np.loadtxt(sig_file, usecols=1)
+                self.az_ramps[modelkey] = np.loadtxt(az_file, usecols=1) * self.ramp_factor
+                self.ra_ramps[modelkey] = np.loadtxt(ra_file, usecols=1) * self.ramp_factor
+                self.sig_ramps[modelkey] = np.loadtxt(sig_file, usecols=1) * self.ramp_factor
 
                 if len(self.az_ramps[modelkey]) > self.Ndates: # Remove the extra date(s) from the iono arrays
                     # Find the index
@@ -884,7 +892,7 @@ class ramps(object):
                 axs[i,0].set_ylim(xmin, xmax)
                 axs[i,1].yaxis.tick_right()
                 axs[i,1].yaxis.set_label_position("right")
-                axs[i,0].set_ylabel(f'$d\phi/d{xy[type]}$')
+                axs[i,0].set_ylabel(f'$d\phi/d{xy[type]}$ ({self.ramp_unit})')
                 if i < axs.shape[0]-1: # Only for scatter plots
                     axs[i,1].set_ylim(xmin, xmax)
                     axs[i,1].plot([xmin, xmax], [xmin, xmax], ls='--', c='k', lw=1)
@@ -894,14 +902,14 @@ class ramps(object):
                     axs[i,0].legend(frameon=False, ncols=2)
 
             ### Scatter and hist axes labels ###
-            axs[0, 1].set_xlabel(f'$d\phi/d{xy[type]}$ data'+otl_label+' - IONO (median)')
-            axs[0, 1].set_ylabel(f'$d\phi/d{xy[type]}$ SET')
+            axs[0, 1].set_xlabel(f'$d\phi/d{xy[type]}$ data'+otl_label+f' - IONO (median) ({self.ramp_unit})')
+            axs[0, 1].set_ylabel(f'$d\phi/d{xy[type]}$ SET ({self.ramp_unit})')
             if do_otl:
-                axs[1, 1].set_xlabel(f'$d\phi/d{xy[type]}$ data - SET - IONO (median)')
-                axs[1, 1].set_ylabel(f'$d\phi/d{xy[type]}$ OTL')
-            axs[1+do_otl, 1].set_xlabel(f'$d\phi/d{xy[type]}$ data - SET'+otl_label+' filtered')
-            axs[1+do_otl, 1].set_ylabel(f'$d\phi/d{xy[type]}$ IONO')
-            axs[2+do_otl, 1].set_xlabel(f'$d\phi/d{xy[type]}$ data - SET'+otl_label+' - IONO - fit')
+                axs[1, 1].set_xlabel(f'$d\phi/d{xy[type]}$ data - SET - IONO (median) ({self.ramp_unit})')
+                axs[1, 1].set_ylabel(f'$d\phi/d{xy[type]}$ OTL ({self.ramp_unit})')
+            axs[1+do_otl, 1].set_xlabel(f'$d\phi/d{xy[type]}$ data - SET'+otl_label+f' filtered ({self.ramp_unit})')
+            axs[1+do_otl, 1].set_ylabel(f'$d\phi/d{xy[type]}$ IONO ({self.ramp_unit})')
+            axs[2+do_otl, 1].set_xlabel(f'$d\phi/d{xy[type]}$ data - SET'+otl_label+f' - IONO - fit ({self.ramp_unit})')
             axs[2+do_otl, 1].set_ylabel('N')
 
             ### Indicate R2 ###
@@ -934,14 +942,15 @@ class ramps(object):
 
         return
 
-    def computeRampRates(self, models=None, seasonal=True, min_date=None, max_date=None): # A FAIRE
+    def computeRampRates(self, models=None, seasonal=True, min_date=None, max_date=None): 
         '''
         Computes the ramp rate:
             - on raw ramp time-series
             - after correction for Solid Earth Tides (SET) if existing
             - after correction for Ocean Tide Loadgin (OTL) if existing
             - after correction for ionosphere (with possibly several TEC models)
-        Ramp rates stored in the self.ra_ramp_rates and self.az_ramp_rates dicts
+        Ramp rates stored in the self.ra_ramprates and self.az_ramprates dicts
+        Uncertainties stored in the self.ra_ramprates_sig and self.az_ramprates_sig dicts
 
         Kwargs:
             * models : list of models to use to compute de median model (if None use self.possible_iono_models)
@@ -980,14 +989,6 @@ class ramps(object):
         self.computeIonoMedian()
         R['Range']['IONO median'] = self.ra_ramps['Iono median']
         R['Azimuth']['IONO median'] = self.az_ramps['Iono median']
-
-        modelkeys = []
-        for model in models:
-            temp_key = utils.iono2key(model)
-            if temp_key in list(self.ra_ramps.keys()):
-                modelkeys.append(temp_key)
-                R['Range'][temp_key] = self.ra_ramps[temp_key]
-                R['Azimuth'][temp_key] = self.az_ramps[temp_key]
 
         xy = {'Range': 'x', 'Azimuth':'y'}
         self.ra_ramprates = {}
@@ -1031,6 +1032,92 @@ class ramps(object):
                     self.ra_ramprates[d], self.ra_ramprates_sig[d] = rate, rate_sig
                 if type == 'Azimuth':
                     self.az_ramprates[d], self.az_ramprates_sig[d] = rate, rate_sig
+
+        return
+    
+    def computeSeasAmp(self, models=None, min_date=None, max_date=None):
+        '''
+        Computes the amplitude of the seasonal term fitted:
+            - on raw ramp time-series
+            - after correction for Solid Earth Tides (SET) if existing
+            - after correction for Ocean Tide Loadgin (OTL) if existing
+            - after correction for ionosphere (with possibly several TEC models)
+        Amplitudes stored in the self.ra_seasamp and self.az_seasamp dicts
+
+        Kwargs:
+            * models : list of models to use to compute de median model (if None use self.possible_iono_models)
+            * seasonal : add a seasonal component
+            * min_date  : only fit data after this date
+            * max_date  : only fit data before this date
+
+        Returns:
+            * None
+        '''
+        if models is None: # Find all the ionospheric models
+            models = self.possible_iono_models
+        elif not isinstance(models, list):
+            sys.exit('Problem with model list')
+
+        # Define dicts for range et azimuth ramps
+        R = {}
+        R['Range'] = {}
+        R['Azimuth'] = {}
+        R['Range']['Data'] = self.ra_ramps['Data']
+        R['Azimuth']['Data'] = self.az_ramps['Data']
+        R['Range']['SET'] = self.ra_ramps['SET']
+        R['Azimuth']['SET'] = self.az_ramps['SET']
+        
+        if 'OTL' in self.ra_ramps:
+            do_otl = 1
+            otl_label = ' - OTL'
+            R['Range']['OTL'] = self.ra_ramps['OTL']
+            R['Azimuth']['OTL'] = self.az_ramps['OTL']
+        else:
+            do_otl = 0
+            otl_label = ''
+            R['Range']['OTL'] = np.zeros_like(self.ra_ramps['Data'])
+            R['Azimuth']['OTL'] = np.zeros_like(self.az_ramps['Data'])
+
+        self.computeIonoMedian()
+        R['Range']['IONO median'] = self.ra_ramps['Iono median']
+        R['Azimuth']['IONO median'] = self.az_ramps['Iono median']
+
+        xy = {'Range': 'x', 'Azimuth':'y'}
+        self.ra_seasamp = {}
+        self.az_seasamp = {}
+
+        for type in xy:
+            dicR = R[type]
+
+            # Fill an array with all the datasets to fit
+
+            # Raw data and SET
+            data = {'Data': dicR['Data'],
+                    'Data - SET': dicR['Data'] - dicR['SET']
+                   }
+            
+            # OTL if exists
+            if do_otl:
+                data['Data - OTL'] = dicR['Data'] - dicR['OTL']
+
+            # Iono
+            data['Data - IONO'] = dicR['Data'] - dicR['IONO median']
+            
+            # All corrections
+            if do_otl:
+                data['Data - ALL'] = dicR['Data'] - dicR['SET'] - dicR['OTL'] - dicR['IONO median']
+            else:
+                data['Data - ALL'] = dicR['Data'] - dicR['SET'] - dicR['IONO median']
+
+            for d in data:
+                # Fit linear + seasonal
+                _, _, sin_amp, cos_amp, _ = utils.linear_seasonal_fit_sigma(self.dates_decyr, data[d], min_date=min_date, max_date=max_date)
+
+                # Store results
+                if type == 'Range':
+                    self.ra_seasamp[d] = np.sqrt(sin_amp**2+cos_amp**2)
+                if type == 'Azimuth':
+                    self.az_seasamp[d] = np.sqrt(sin_amp**2+cos_amp**2)
 
         return
 

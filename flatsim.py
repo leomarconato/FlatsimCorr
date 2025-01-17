@@ -33,7 +33,6 @@ plt.rcParams['figure.figsize'] = [8,5]
 plt.rcParams['figure.dpi'] = 300
 
 class flatsim(object):
-
     '''
     Args:
         * name      : Name of the FLATSIM dataset (e.g. A059SUD or D137NORD)
@@ -42,17 +41,13 @@ class flatsim(object):
         * datadir   : directory where to look for the TS and AUX flatsim data (default, current dir)
         * savedir   : directory where to store computation files and outputs (default, current dir)
         * look_unw  : multiloooking factor if the final Flatsim products, to find the files (default, 8)
-        * utmzone   : UTM zone (optional)
-        * lon0      : Longitude of the utmzone (optional)
-        * lat0      : Latitude of the utmzone (optional)
-        * ellps     : ellipsoid (optional, default='WGS84')
         * verbose   : optional, default=True)
 
     Returns:
         * None
     '''
 
-    def __init__(self, name, datadir='.', savedir='.', look_unw=8, utmzone=None, ellps='WGS84', lon0=None, lat0=None, verbose=True):
+    def __init__(self, name, datadir='.', savedir='.', look_unw=8, verbose=True):
 
         self.name = name
         self.verbose = verbose
