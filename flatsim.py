@@ -114,7 +114,7 @@ class flatsim(object):
             # Open the velocity map and make a mask with 0 values
             ds = gdal.Open(self.file_velmap, gdal.GA_ReadOnly)
             vel = ds.GetRasterBand(1).ReadAsArray()
-            self.mask = np.where(vel==0., np.nan, 1)
+            self.mask_arr = np.where(vel==0., np.nan, 1)
 
         # Load image list 
         if self.verbose:
@@ -306,8 +306,8 @@ class flatsim(object):
 
         # Mask areas with no data
         if self.mask:
-            self.lon_radar *= self.mask
-            self.lat_radar *= self.mask
+            self.lon_radar *= self.mask_arr
+            self.lat_radar *= self.mask_arr
 
         if plot:
             fig, axs = plt.subplots(1, 2, sharey=True)#, figsize=(8,4))
