@@ -84,23 +84,25 @@ class flatsim(object):
                     print("         -> Set as AUX directory")
                 self.aux_dir = dir
 
+        self.look_unw = look_unw
+
         # Exit if data dirs not found
         if self.ts_dir is None or self.aux_dir is None:
                 sys.exit("Data directories not found")
 
         # Store usefull file names, and check they are here
 
-        self.file_meta = os.path.join(self.ts_dir, f'CNES_MV-LOS_radar_{look_unw}rlks.meta')
+        self.file_meta = os.path.join(self.ts_dir, f'CNES_MV-LOS_radar_{self.look_unw}rlks.meta')
         if not os.path.isfile(self.file_meta):
-            sys.exit(f"CNES_MV-LOS_radar_{look_unw}rlks.meta not found")
+            sys.exit(f"CNES_MV-LOS_radar_{self.look_unw}rlks.meta not found")
 
-        self.file_lut_radar = os.path.join(self.aux_dir, f'CNES_Lut_radar_{look_unw}rlks.tiff')
+        self.file_lut_radar = os.path.join(self.aux_dir, f'CNES_Lut_radar_{self.look_unw}rlks.tiff')
         if not os.path.isfile(self.file_lut_radar):
-            sys.exit(f"CNES_Lut_radar_{look_unw}rlks.tiff not found")
+            sys.exit(f"CNES_Lut_radar_{self.look_unw}rlks.tiff not found")
 
-        self.file_los_radar = os.path.join(self.aux_dir, f'CNES_CosENU_radar_{look_unw}rlks.tiff')
+        self.file_los_radar = os.path.join(self.aux_dir, f'CNES_CosENU_radar_{self.look_unw}rlks.tiff')
         if not os.path.isfile(self.file_los_radar):
-            sys.exit(f"CNES_CosENU_radar_{look_unw}rlks.tiff not found")
+            sys.exit(f"CNES_CosENU_radar_{self.look_unw}rlks.tiff not found")
 
         # Load image list 
         if self.verbose:
@@ -1228,17 +1230,19 @@ class flatsim(object):
 ### NB: topside iono factor set at 0.75 by default (changed from 0.9 in (former) MF3 on 13/01/25)
 ###     ionosphere height set at 400 km by default
 
-    def computeTecRampsRGP(self, skip_res=100, top_iono=0.84):
+    def computeTecRampsRGP(self, skip_res=None, top_iono=0.84):
         '''
         Compute ramps due to TEC from the RGP IONEX model (centered on France)
         /!\ New mapping function with only change if incidence angle at IPP (no refraction)
         
         Kwargs:
-            * skip_res   : decimation factor in range and azimuth (default, 100)
+            * skip_res   : decimation factor in range and azimuth (default, computed from self.look_unw)
 
         Returns:
             * None
         '''
+        if skip_res is None:
+            skip_res = int(800/self.look_unw) # 8rlks -> 100; 16rlks -> 50...
 
         self.getAcquisitionTime()
         self.getLatLon()
@@ -1326,18 +1330,20 @@ class flatsim(object):
 
         return
 
-    def computeTecRampsIGS(self, skip_res=100, top_iono=0.84, model='IGS'):
+    def computeTecRampsIGS(self, skip_res=None, top_iono=0.84, model='IGS'):
         '''
         Compute ramps due to TEC from different GIMs compiled by IGS.
         /!\ New mapping function with only change if incidence angle at IPP (no refraction)
         
         Kwargs:
             * model      : model to used: IGS, JPL, CODE, ESA, UPC (default, IGS)
-            * skip_res   : decimation factor in range and azimuth (default, 100)
+            * skip_res   : decimation factor in range and azimuth (default, computed from self.look_unw)
 
         Returns:
             * None
         '''
+        if skip_res is None:
+            skip_res = int(800/self.look_unw) # 8rlks -> 100; 16rlks -> 50...
 
         self.getAcquisitionTime()
         self.getLatLon()
@@ -1439,17 +1445,19 @@ class flatsim(object):
 
         return
 
-    def computeTecRampsJPLD(self, skip_res=100, top_iono=0.84):
+    def computeTecRampsJPLD(self, skip_res=None, top_iono=0.84):
         '''
         Compute ramps due to TEC from the JPLD research GIM (1°, 15' resolution).
         /!\ New mapping function with only change if incidence angle at IPP (no refraction)
         
         Kwargs:
-            * skip_res   : decimation factor in range and azimuth (default, 100)
+            * skip_res   : decimation factor in range and azimuth (default, computed from self.look_unw)
 
         Returns:
             * None
         '''
+        if skip_res is None:
+            skip_res = int(800/self.look_unw) # 8rlks -> 100; 16rlks -> 50...
 
         self.getAcquisitionTime()
         self.getLatLon()
