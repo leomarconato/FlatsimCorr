@@ -1228,7 +1228,7 @@ class flatsim(object):
 ### NB: topside iono factor set at 0.75 by default (changed from 0.9 in (former) MF3 on 13/01/25)
 ###     ionosphere height set at 400 km by default
 
-    def computeTecRampsRGP(self, skip_res=100, top_iono=0.75):
+    def computeTecRampsRGP(self, skip_res=100, top_iono=0.84):
         '''
         Compute ramps due to TEC from the RGP IONEX model (centered on France)
         /!\ New mapping function with only change if incidence angle at IPP (no refraction)
@@ -1326,7 +1326,7 @@ class flatsim(object):
 
         return
 
-    def computeTecRampsIGS(self, skip_res=100, top_iono=0.75, model='IGS'):
+    def computeTecRampsIGS(self, skip_res=100, top_iono=0.84, model='IGS'):
         '''
         Compute ramps due to TEC from different GIMs compiled by IGS.
         /!\ New mapping function with only change if incidence angle at IPP (no refraction)
@@ -1439,7 +1439,7 @@ class flatsim(object):
 
         return
 
-    def computeTecRampsJPLD(self, skip_res=100, top_iono=0.75):
+    def computeTecRampsJPLD(self, skip_res=100, top_iono=0.84):
         '''
         Compute ramps due to TEC from the JPLD research GIM (1°, 15' resolution).
         /!\ New mapping function with only change if incidence angle at IPP (no refraction)
