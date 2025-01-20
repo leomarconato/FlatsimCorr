@@ -112,7 +112,7 @@ class flatsim(object):
             if not os.path.isfile(self.file_velmap):
                 sys.exit(f"CNES_MV-LOS_radar_{self.look_unw}rlks.tiff not found")
             # Open the velocity map and make a mask with 0 values
-            vel = gdal.Open('../CNES_MV-LOS_radar_8rlks.tiff', gdal.GA_ReadOnly).GetRasterBand(1).ReadAsArray()
+            vel = gdal.Open(self.file_velmap, gdal.GA_ReadOnly).GetRasterBand(1).ReadAsArray()
             self.mask = np.where(vel==0., np.nan, 1)
 
         # Load image list 
