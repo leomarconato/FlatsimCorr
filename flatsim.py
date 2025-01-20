@@ -41,16 +41,20 @@ class flatsim(object):
         * datadir   : directory where to look for the TS and AUX flatsim data (default, current dir)
         * savedir   : directory where to store computation files and outputs (default, current dir)
         * look_unw  : multiloooking factor if the final Flatsim products, to find the files (default, 8)
+        * mask      : if True (default), the pixels with no mean velocity are masked in the Lon and Lat arrays
+                            -> allows to compute ramps only where there actually is data
         * verbose   : optional, default=True)
 
     Returns:
         * None
     '''
 
-    def __init__(self, name, datadir='.', savedir='.', look_unw=8, verbose=True):
+    def __init__(self, name, datadir='.', savedir='.', look_unw=8, mask=True, verbose=True):
 
         self.name = name
         self.verbose = verbose
+        self.look_unw = look_unw
+        self.mask = mask
 
         if self.verbose:
             print("---------------------------------")
@@ -84,8 +88,6 @@ class flatsim(object):
                     print("         -> Set as AUX directory")
                 self.aux_dir = dir
 
-        self.look_unw = look_unw
-
         # Exit if data dirs not found
         if self.ts_dir is None or self.aux_dir is None:
                 sys.exit("Data directories not found")
@@ -103,6 +105,15 @@ class flatsim(object):
         self.file_los_radar = os.path.join(self.aux_dir, f'CNES_CosENU_radar_{self.look_unw}rlks.tiff')
         if not os.path.isfile(self.file_los_radar):
             sys.exit(f"CNES_CosENU_radar_{self.look_unw}rlks.tiff not found")
+
+        # Load velocity map and define a mask
+        if self.mask:
+            self.file_velmap = os.path.join(self.ts_dir, f'CNES_MV-LOS_radar_{self.look_unw}rlks.tiff')
+            if not os.path.isfile(self.file_velmap):
+                sys.exit(f"CNES_MV-LOS_radar_{self.look_unw}rlks.tiff not found")
+            # Open the velocity map and make a mask with 0 values
+            vel = gdal.Open('../CNES_MV-LOS_radar_8rlks.tiff', gdal.GA_ReadOnly).GetRasterBand(1).ReadAsArray()
+            self.mask = np.where(vel==0., np.nan, 1)
 
         # Load image list 
         if self.verbose:
@@ -291,6 +302,11 @@ class flatsim(object):
         # Put 0 as NaNs
         self.lon_radar[self.lon_radar==0.] = np.nan
         self.lat_radar[self.lat_radar==0.] = np.nan
+
+        # Mask areas with no data
+        if self.mask:
+            self.lon_radar *= self.mask
+            self.lat_radar *= self.mask
 
         if plot:
             fig, axs = plt.subplots(1, 2, sharey=True)#, figsize=(8,4))
