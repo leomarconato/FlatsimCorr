@@ -1267,6 +1267,7 @@ class flatsim(object):
         if self.verbose:
             print("\n---------------------------------")
             print(f"    Computing ionospheric ramps with RGP TEC model")
+            print(f"    Decimation factor: {skip_res}")
             
         if self.verbose:
             print(f"\n        Fetch RGP TEC data for all dates...")
@@ -1368,6 +1369,7 @@ class flatsim(object):
         if self.verbose:
             print("\n---------------------------------")
             print(f"    Computing ionospheric ramps with IGS TEC model")
+            print(f"    Decimation factor: {skip_res}")
             
         if self.verbose:
             print(f"\n        Fetch IGS TEC data for all dates...")
@@ -1482,6 +1484,7 @@ class flatsim(object):
         if self.verbose:
             print("\n---------------------------------")
             print(f"    Computing ionospheric ramps with JPLD TEC model")
+            print(f"    Decimation factor: {skip_res}")
             
         if self.verbose:
             print(f"\n        Fetch JPLD TEC data for all dates...")
