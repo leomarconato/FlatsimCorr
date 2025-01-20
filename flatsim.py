@@ -51,10 +51,6 @@ class flatsim(object):
 
         self.name = name
         self.verbose = verbose
-        self.utmzone = utmzone
-        self.ellps = ellps
-        self.lon0 = lon0
-        self.lat0 = lat0
 
         if self.verbose:
             print("---------------------------------")
@@ -940,6 +936,52 @@ class flatsim(object):
 
                 return E
 
+    def ground2shell(self, lat, lon, H=400, earth_radius=6371):
+        '''
+        Convert lat-lon on the ground to lat-lon on a spherical thin-shell in spherical coordinates
+        Uses Eq. 12 from Yunjun et al. (2022).
+            -> run after getIncidence
+
+        Args:
+            * lat: array of latitude on the ground
+            * lon: array of longitude on the ground
+                -> both arrays must be the same size as self.incidence
+
+        Kwargs:
+            * H                  : height of the IPP (default, 400 km)
+            * earth_radius       : radius of the Earth (default, 6371 km)
+
+        Returns:
+            * lat, lon on the shell
+        '''
+
+        if np.all((self.incidence.shape!=lon.shape)) or np.all(lon.shape!=lat.shape):
+                sys.exit("Problem with array sizes")
+
+        # Incidence angle on the thin-shell
+        theta_ipp = np.arcsin(earth_radius*np.sin(np.radians(self.incidence))/(earth_radius+H))
+
+        # Geocentric angular distance between target and the thin-shell
+        alpha_ipp = np.radians(self.incidence) - theta_ipp 
+
+        # Azimuth angle of the LOS from target to satellite 
+        # measured from north with anticlockwise as positive
+        beta = np.radians(180-self.look_angle)
+
+        # Target latitude and longitude
+        rau_t, phi_t = np.radians(lat), np.radians(lon)
+
+        # Equation 12:
+        rau_ipp = np.arcsin(  np.sin(rau_t) * np.cos(alpha_ipp) 
+                            + np.cos(rau_t) * np.sin(alpha_ipp) * np.cos(beta) )
+
+        delta_phi = np.arctan2(- np.sin(alpha_ipp) * np.cos(rau_t) * np.sin(beta), 
+                                np.cos(alpha_ipp) - np.sin(rau_t) * np.sin(rau_ipp) )
+
+        phi_ipp = np.mod( phi_t + delta_phi + np.pi, 2*np.pi ) - np.pi
+
+        return np.degrees(rau_ipp), np.degrees(phi_ipp) # lat, lon
+
     def ground2IPP(self, lon=None, lat=None, H=400, pad=200, time_shifts=None, plot=True, saveplot=False):
         '''
         Convert lat-lon on the ground to lat-lon at the ionospheric piercing point (IPP).
@@ -973,8 +1015,13 @@ class flatsim(object):
             lat = self.lat_radar
 
         # Without time_shift
-        self.lat_iono = lat + H/degree_length * np.tan(np.radians(self.incidence)) * np.sin(np.radians(self.look_angle-90))
-        self.lon_iono = lon - H/degree_length * np.tan(np.radians(self.incidence)) * np.cos(np.radians(self.look_angle-90))
+
+        # /!\ OLD method in cartesian
+        # self.lat_iono = lat + H/degree_length * np.tan(np.radians(self.incidence)) * np.sin(np.radians(self.look_angle-90))
+        # self.lon_iono = lon - H/degree_length * np.tan(np.radians(self.incidence)) * np.cos(np.radians(self.look_angle-90))
+
+        # New method in spherical (from Yunjun et al., 2022)
+        self.lat_iono, self.lon_iono = self.ground2shell(lat, lon, H=H)
 
         corner_lats = np.array((lat[pad][pad], lat[pad][-pad], lat[-pad][-pad], lat[-pad][pad], lat[pad][pad]))
         corner_lons = np.array((lon[pad][pad], lon[pad][-pad], lon[-pad][-pad], lon[-pad][pad], lon[pad][pad]))
