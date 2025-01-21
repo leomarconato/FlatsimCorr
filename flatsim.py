@@ -677,7 +677,7 @@ class flatsim(object):
                 urllib.request.urlretrieve(url, filename=local_file)
                 self.mit_files[date] = local_file
             except:
-                os.remove(local_file)
+                #os.remove(local_file)
                 print(f'{mit_file} not found on server')
                 
         return
