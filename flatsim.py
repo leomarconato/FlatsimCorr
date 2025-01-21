@@ -1797,7 +1797,7 @@ class flatsim(object):
         for i in tqdm(range(self.Ndates)):
             date = self.dates[i]
 
-            if date in len(list(self.mit_files.keys())):
+            if date in list(self.mit_files.keys()):
 
                 # Get the TEC 
                 tec = self.computeTecMIT(date, skip_res=skip_res, plot=False, saveplot=False)

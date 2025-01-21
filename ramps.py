@@ -511,13 +511,12 @@ class ramps(object):
             fig, axs = plt.subplots(3, sharex=True)
 
         for model in models:
-
             # Choose the right directory
             if model.startswith('IGS'):
                 modeldir = 'iono_igs'
                 modelkey = model[4:]
             else:
-                modeldir = 'iono_'+model.lower().replace('2', '').replace('3', '') # TEMPORARY !!!
+                modeldir = 'iono_'+model.lower()
                 modelkey = model
             
             az_file = os.path.join(os.path.join(self.savedir, modeldir, f'list_ramp_az_{model}.txt'))
@@ -942,13 +941,186 @@ class ramps(object):
 
         return
 
+    def analysisIonoSETOTL2(self, plot=False, saveplot=False, models=None, itrf_ra=None, itrf_az=None, min_date=None, max_date=None):
+        '''
+        NB: new version where the trend and seasonal are also remove for data vs SET/OTL comparison.
+            + linear fit only removed from the last panel
+
+        Computes and plot the time-series of (range ans azimuth) ramps:
+            - before/after correction for Solid Earth Tides (SET)
+            - before/after correction for ionosphere (with possibly several TEC models)
+            - before/after a linear (and seasonal) fit in the corrected ramp time-series
+
+        NB: modified wrt analysisIonoSET (each correction is compared to the data corrected from the other corrections in order to better see the correlation)
+
+        Kwargs:
+            * saveplot : save the plots?
+            * models : list of models to use (if None use self.possible_iono_models)
+            * min_date  : only fit data after this date
+            * max_date  : only fit data before this date
+            * itrf_ra : plot a ramp rate in range
+            * itrf_az : plot a ramp rate in azimuth
+
+        Returns:
+            * two array containing the standard deviations after each correction for range and azimuth ramps, respectively
+        '''
+
+        if models is None: # Find all the ionospheric models
+            models = self.possible_iono_models
+        elif not isinstance(models, list):
+            sys.exit('Problem with model list')
+
+        # Define dicts for range et azimuth ramps
+        R = {}
+        R['Range'] = {}
+        R['Azimuth'] = {}
+        R['Range']['Data'] = self.ra_ramps['Data']
+        R['Azimuth']['Data'] = self.az_ramps['Data']
+        R['Range']['SET'] = self.ra_ramps['SET']
+        R['Azimuth']['SET'] = self.az_ramps['SET']
+        
+        if 'OTL' in self.ra_ramps:
+            do_otl = 1
+            otl_label = ' - OTL'
+            R['Range']['OTL'] = self.ra_ramps['OTL']
+            R['Azimuth']['OTL'] = self.az_ramps['OTL']
+        else:
+            do_otl = 0
+            otl_label = ''
+            R['Range']['OTL'] = np.zeros_like(self.ra_ramps['Data'])
+            R['Azimuth']['OTL'] = np.zeros_like(self.az_ramps['Data'])
+
+        self.computeIonoMedian()
+        R['Range']['IONO median'] = self.ra_ramps['Iono median']
+        R['Azimuth']['IONO median'] = self.az_ramps['Iono median']
+
+        modelkeys = []
+        colors = []
+        for model in models:
+            temp_key = utils.iono2key(model)
+            if temp_key in list(self.ra_ramps.keys()):
+                modelkeys.append(temp_key)
+                colors.append(self.iono_colors[model])
+                R['Range'][temp_key] = self.ra_ramps[temp_key]
+                R['Azimuth'][temp_key] = self.az_ramps[temp_key]
+
+        xy = {'Range': 'x', 'Azimuth':'y'}
+
+        for type in xy:
+            dicR = R[type]
+
+            fig, axs = plt.subplots(3+do_otl, 2, sharex='col', width_ratios=[3, 1], figsize=(8,(3+do_otl)*2))
+
+            # Compute the fit after all corrections
+            corrected = (dicR['Data'] - dicR['SET'] - dicR['OTL'] - dicR['IONO median']) # with median of iono models
+            cst, vel, sin, cos = utils.linear_seasonal_fit(self.dates_decyr, corrected, min_date=min_date, max_date=max_date)
+            fit = cst+self.dates_decyr*vel+sin*np.sin(2*np.pi*self.dates_decyr)+cos*np.cos(2*np.pi*self.dates_decyr)
+            
+            ### Left: Time-series ###
+
+            axs[0,0].plot(self.dates_decyr, dicR['Data']-dicR['OTL']-dicR['IONO median']-fit, c='k', linewidth=0.5, label='Data'+otl_label+' - IONO (median) - fit')
+            axs[0,0].plot(self.dates_decyr, dicR['SET'], c='r', linewidth=1, alpha=0.8, label='SET')
+
+            if do_otl:
+                axs[do_otl,0].plot(self.dates_decyr, dicR['Data']-dicR['SET']-dicR['IONO median']-fit, c='k', linewidth=0.5, label='Data - SET - IONO (median) - fit')
+                axs[do_otl,0].plot(self.dates_decyr, dicR['OTL'], c='dodgerblue', linewidth=1, alpha=0.8, label='OTL')
+            
+            axs[1+do_otl,0].plot(self.dates_decyr, dicR['Data']-dicR['SET']-dicR['OTL'], c='k', linewidth=0.5, ls=':', label='Data - SET'+otl_label+'')
+            filtered = utils.sliding_median(self.dates_decyr, dicR['Data']-dicR['SET']-dicR['OTL'])
+            axs[1+do_otl,0].plot(self.dates_decyr, filtered, c='k', linewidth=1, label='Data - SET'+otl_label+' filtered')
+
+            for i in range(len(modelkeys)):
+                axs[1+do_otl,0].plot(self.dates_decyr, dicR[modelkeys[i]], linewidth=1, alpha=0.8, label=modelkeys[i], color=colors[i])
+            
+            axs[2+do_otl,0].plot(self.dates_decyr, corrected, c='k', linewidth=0.5, label='Data - SET'+otl_label+' - IONO (median)')
+            axs[2+do_otl,0].plot(self.dates_decyr, fit, c='tab:green', linewidth=2, alpha=0.8, 
+                                 label='Linear + seasonal fit')
+                                 #label=f'Ramp rate: {vel:.1e} {self.ramp_unit}/yr\nSeasonal amplitude: {np.sqrt(sin**2+cos**2):.1e} {self.ramp_unit}')
+            if itrf_ra is not None and type=='Range':
+                axs[2+do_otl,0].plot(self.dates_decyr, (self.dates_decyr-self.dates_decyr[int(len(self.dates_decyr)/2)])*itrf_ra, 
+                                c='k', ls='--', linewidth=2, alpha=1, zorder=0, label=f'GNSS ramp rate')#: {itrf_ra:.1e}')
+            if itrf_az is not None and type=='Azimuth':
+                axs[2+do_otl,0].plot(self.dates_decyr, (self.dates_decyr-self.dates_decyr[int(len(self.dates_decyr)/2)])*itrf_az, 
+                                c='k', ls='--', linewidth=2, alpha=1, zorder=0, label=f'GNSS ramp rate')#: {itrf_az:.1e}')
+
+            ### Right: Scatter and histo ###
+
+            axs[0,1].scatter(dicR['Data']-dicR['OTL']-dicR['IONO median']-fit, dicR['SET'], marker='.', linewidth=0, s=10, color='r')
+            if do_otl:
+                axs[do_otl,1].scatter(dicR['Data']-dicR['SET']-dicR['IONO median']-fit, dicR['OTL'], marker='.', linewidth=0, s=10, color='dodgerblue')
+
+            for i in range(len(modelkeys)):
+                #axs[1,1].scatter(dicR['Data']-dicR['SET'], dicR[models[i]], marker='.', linewidth=0, s=10, alpha=0.4)
+                axs[1+do_otl,1].scatter(filtered, dicR[modelkeys[i]], marker='.', linewidths=0, s=10, alpha=0.4, color=colors[i])
+
+            axs[2+do_otl,1].hist(corrected-fit, bins=21, color='tab:green', alpha=0.8)
+
+            ### Limits ###
+
+            xmin = min(axs[0,1].get_xlim()[0], axs[1,1].get_ylim()[0])
+            xmax = max(axs[0,1].get_xlim()[1], axs[1,1].get_ylim()[1])
+
+            for i in range(axs.shape[0]):
+                axs[i,1].set_xlim(xmin, xmax)
+                axs[i,0].set_ylim(xmin, xmax)
+                axs[i,1].yaxis.tick_right()
+                axs[i,1].yaxis.set_label_position("right")
+                axs[i,0].set_ylabel(f'$d\phi/d{xy[type]}$ ({self.ramp_unit})')
+                if i < axs.shape[0]-1: # Only for scatter plots
+                    axs[i,1].set_ylim(xmin, xmax)
+                    axs[i,1].plot([xmin, xmax], [xmin, xmax], ls='--', c='k', lw=1)
+                    axs[i,0].legend(frameon=False, ncols=4)
+                else: # Only for histo
+                    axs[i,1].axvline(ls='--', c='k', lw=1)
+                    axs[i,0].legend(frameon=False, ncols=2)
+
+            ### Scatter and hist axes labels ###
+            axs[0, 1].set_xlabel(f'$d\phi/d{xy[type]}$ data'+otl_label+f' - IONO (median) - fit ({self.ramp_unit})')
+            axs[0, 1].set_ylabel(f'$d\phi/d{xy[type]}$ SET ({self.ramp_unit})')
+            if do_otl:
+                axs[1, 1].set_xlabel(f'$d\phi/d{xy[type]}$ data - SET - IONO (median) - fit ({self.ramp_unit})')
+                axs[1, 1].set_ylabel(f'$d\phi/d{xy[type]}$ OTL ({self.ramp_unit})')
+            axs[1+do_otl, 1].set_xlabel(f'$d\phi/d{xy[type]}$ data - SET'+otl_label+f' filtered ({self.ramp_unit})')
+            axs[1+do_otl, 1].set_ylabel(f'$d\phi/d{xy[type]}$ IONO ({self.ramp_unit})')
+            axs[2+do_otl, 1].set_xlabel(f'$d\phi/d{xy[type]}$ data - SET'+otl_label+f' - IONO - fit ({self.ramp_unit})')
+            axs[2+do_otl, 1].set_ylabel('N')
+
+            ### Indicate R2 ###
+            r_val1 = utils.R2(dicR['Data']-dicR['OTL']-dicR['IONO median']-fit, dicR['SET'])
+            axs[0, 1].text(0.95, 0.05, f"$R^2$ = {r_val1:.2f}", transform=axs[0, 1].transAxes, va='bottom', ha='right')
+            if do_otl:
+                r_val2 = utils.R2(dicR['Data']-dicR['SET']-dicR['IONO median']-fit, dicR['OTL'])
+                axs[1, 1].text(0.95, 0.05, f"$R^2$ = {r_val2:.2f}", transform=axs[1, 1].transAxes, va='bottom', ha='right')
+            r_val3 = utils.R2(filtered, dicR['IONO median'])
+            axs[1+do_otl, 1].text(0.95, 0.05, f"$R^2$ = {r_val3:.2f}", transform=axs[1+do_otl, 1].transAxes, va='bottom', ha='right')
+
+            ### Indicate RMSE ###
+            #axs[0, 1].text(0.05, 0.95, f"RMSE = \n{utils.RMSE(dicR['Data']-dicR['SET']):.2e}", transform=axs[0, 1].transAxes, va='top')
+            #axs[1, 1].text(0.05, 0.95, f"RMSE = \n{utils.RMSE(filtered-dicR['IONO median']):.2e}", transform=axs[1, 1].transAxes, va='top')
+            #axs[2, 1].text(0.05, 0.95, f"RMSE = \n{utils.RMSE(corrected-fit):.2e}", transform=axs[2, 1].transAxes, va='top')
+            axs[2+do_otl, 1].text(0.05, 0.95, f"RMSE =", transform=axs[2+do_otl, 1].transAxes, va='top')
+            axs[2+do_otl, 1].text(0.05, 0.85, f"{utils.RMSE(corrected-fit):.2e}", transform=axs[2+do_otl, 1].transAxes, va='top')
+  
+            fig.suptitle(f'{self.name} - {type} ramps', weight='bold')
+            plt.tight_layout()
+
+            if saveplot:
+                if not os.path.isdir('AnalysisIonoSETOTL'):
+                    os.makedirs('AnalysisIonoSETOTL')
+                plt.savefig(f'AnalysisIonoSETOTL/{self.name}_{type}.png')
+            elif plot:
+                plt.show()
+            plt.close()
+
+        return
+
     def computeRampRates(self, models=None, seasonal=True, min_date=None, max_date=None): 
         '''
         Computes the ramp rate:
             - on raw ramp time-series
-            - after correction for Solid Earth Tides (SET) if existing
-            - after correction for Ocean Tide Loadgin (OTL) if existing
-            - after correction for ionosphere (with possibly several TEC models)
+            - after correction for Solid Earth Tides (SET)
+            - after correction for Ocean Tide Loading (OTL) if existing
+            - after correction for ionosphere (using the median of several models)
         Ramp rates stored in the self.ra_ramprates and self.az_ramprates dicts
         Uncertainties stored in the self.ra_ramprates_sig and self.az_ramprates_sig dicts
 
@@ -977,12 +1149,10 @@ class ramps(object):
         
         if 'OTL' in self.ra_ramps:
             do_otl = 1
-            otl_label = ' - OTL'
             R['Range']['OTL'] = self.ra_ramps['OTL']
             R['Azimuth']['OTL'] = self.az_ramps['OTL']
         else:
             do_otl = 0
-            otl_label = ''
             R['Range']['OTL'] = np.zeros_like(self.ra_ramps['Data'])
             R['Azimuth']['OTL'] = np.zeros_like(self.az_ramps['Data'])
 
@@ -1039,14 +1209,13 @@ class ramps(object):
         '''
         Computes the amplitude of the seasonal term fitted:
             - on raw ramp time-series
-            - after correction for Solid Earth Tides (SET) if existing
-            - after correction for Ocean Tide Loadgin (OTL) if existing
-            - after correction for ionosphere (with possibly several TEC models)
+            - after correction for Solid Earth Tides (SET)
+            - after correction for Ocean Tide Loading (OTL) if existing
+            - after correction for ionosphere (using the median of several models)
         Amplitudes stored in the self.ra_seasamp and self.az_seasamp dicts
 
         Kwargs:
             * models : list of models to use to compute de median model (if None use self.possible_iono_models)
-            * seasonal : add a seasonal component
             * min_date  : only fit data after this date
             * max_date  : only fit data before this date
 
@@ -1069,12 +1238,10 @@ class ramps(object):
         
         if 'OTL' in self.ra_ramps:
             do_otl = 1
-            otl_label = ' - OTL'
             R['Range']['OTL'] = self.ra_ramps['OTL']
             R['Azimuth']['OTL'] = self.az_ramps['OTL']
         else:
             do_otl = 0
-            otl_label = ''
             R['Range']['OTL'] = np.zeros_like(self.ra_ramps['Data'])
             R['Azimuth']['OTL'] = np.zeros_like(self.az_ramps['Data'])
 
@@ -1118,6 +1285,287 @@ class ramps(object):
                     self.ra_seasamp[d] = np.sqrt(sin_amp**2+cos_amp**2)
                 if type == 'Azimuth':
                     self.az_seasamp[d] = np.sqrt(sin_amp**2+cos_amp**2)
+
+        return
+
+    def computeStds(self, models=None):
+        '''
+        Computes the standard deviation of ramps:
+            - on raw ramp time-series
+            - after correction for Solid Earth Tides (SET)
+            - after correction for Ocean Tide Loading (OTL) if existing
+            - after correction for ionosphere (using the median of several models)
+        Results stored in the self.ra_std and self.az_std dicts
+
+        Kwargs:
+            * models : list of models to use to compute de median model (if None use self.possible_iono_models)
+
+        Returns:
+            * None
+        '''
+        if models is None: # Find all the ionospheric models
+            models = self.possible_iono_models
+        elif not isinstance(models, list):
+            sys.exit('Problem with model list')
+
+        # Define dicts for range et azimuth ramps
+        R = {}
+        R['Range'] = {}
+        R['Azimuth'] = {}
+        R['Range']['Data'] = self.ra_ramps['Data']
+        R['Azimuth']['Data'] = self.az_ramps['Data']
+        R['Range']['SET'] = self.ra_ramps['SET']
+        R['Azimuth']['SET'] = self.az_ramps['SET']
+        
+        if 'OTL' in self.ra_ramps:
+            do_otl = 1
+            R['Range']['OTL'] = self.ra_ramps['OTL']
+            R['Azimuth']['OTL'] = self.az_ramps['OTL']
+        else:
+            do_otl = 0
+            R['Range']['OTL'] = np.zeros_like(self.ra_ramps['Data'])
+            R['Azimuth']['OTL'] = np.zeros_like(self.az_ramps['Data'])
+
+        self.computeIonoMedian()
+        R['Range']['IONO median'] = self.ra_ramps['Iono median']
+        R['Azimuth']['IONO median'] = self.az_ramps['Iono median']
+
+        xy = {'Range': 'x', 'Azimuth':'y'}
+        self.ra_std = {}
+        self.az_std = {}
+
+        for type in xy:
+            dicR = R[type]
+
+            # Fill an array with all the datasets to fit
+
+            # Raw data and SET
+            data = {'Data': dicR['Data'],
+                    'Data - SET': dicR['Data'] - dicR['SET']
+                   }
+            
+            # OTL if exists
+            if do_otl:
+                data['Data - OTL'] = dicR['Data'] - dicR['OTL']
+
+            # Iono
+            data['Data - IONO'] = dicR['Data'] - dicR['IONO median']
+            
+            # All corrections
+            if do_otl:
+                data['Data - ALL'] = dicR['Data'] - dicR['SET'] - dicR['OTL'] - dicR['IONO median']
+            else:
+                data['Data - ALL'] = dicR['Data'] - dicR['SET'] - dicR['IONO median']
+
+            for d in data:
+                # Store results
+                if type == 'Range':
+                    self.ra_std[d] = np.nanstd(data[d])
+                if type == 'Azimuth':
+                    self.az_std[d] = np.nanstd(data[d])
+
+        return
+
+    def computeStdReductions(self, models=None, min_date=None, max_date=None):
+        '''
+        Computes the reduction of standard deviation of ramps when applying:
+            - the correction for Solid Earth Tides (SET)
+            - the correction for Ocean Tide Loading (OTL) if existing
+            - the correction for ionosphere (using the median of several models)
+        Results stored in the self.ra_stdred and self.az_stdred dicts
+
+        Kwargs:
+            * models : list of models to use to compute de median model (if None use self.possible_iono_models)
+            * min_date  : only fit data after this date
+            * max_date  : only fit data before this date
+            
+        Returns:
+            * None
+        '''
+        if models is None: # Find all the ionospheric models
+            models = self.possible_iono_models
+        elif not isinstance(models, list):
+            sys.exit('Problem with model list')
+
+        # Define dicts for range et azimuth ramps
+        R = {}
+        R['Range'] = {}
+        R['Azimuth'] = {}
+        R['Range']['Data'] = self.ra_ramps['Data']
+        R['Azimuth']['Data'] = self.az_ramps['Data']
+        R['Range']['SET'] = self.ra_ramps['SET']
+        R['Azimuth']['SET'] = self.az_ramps['SET']
+        
+        if 'OTL' in self.ra_ramps:
+            do_otl = 1
+            R['Range']['OTL'] = self.ra_ramps['OTL']
+            R['Azimuth']['OTL'] = self.az_ramps['OTL']
+        else:
+            do_otl = 0
+            R['Range']['OTL'] = np.zeros_like(self.ra_ramps['Data'])
+            R['Azimuth']['OTL'] = np.zeros_like(self.az_ramps['Data'])
+
+        self.computeIonoMedian()
+        R['Range']['IONO median'] = self.ra_ramps['Iono median']
+        R['Azimuth']['IONO median'] = self.az_ramps['Iono median']
+
+        xy = {'Range': 'x', 'Azimuth':'y'}
+        self.ra_stdred = {}
+        self.az_stdred = {}
+
+        for type in xy:
+            dicR = R[type]
+
+            # Fill an array with all the datasets to fit
+
+            # OTL if exists
+            if do_otl:
+                # Compute the fit after all corrections
+                corrected = dicR['Data'] - dicR['SET'] - dicR['OTL'] - dicR['IONO median']
+                cst, vel, sin, cos = utils.linear_seasonal_fit(self.dates_decyr, corrected, min_date=min_date, max_date=max_date)
+                fit = cst+self.dates_decyr*vel+sin*np.sin(2*np.pi*self.dates_decyr)+cos*np.cos(2*np.pi*self.dates_decyr)
+                # Set all the time-series
+                data = {'Data - OTL - IONO - fit': dicR['Data'] - dicR['OTL'] - dicR['IONO median'] - fit,  # for SET
+                        'Data - SET - IONO - fit': dicR['Data'] - dicR['SET'] - dicR['IONO median'] - fit,  # for OTL
+                        'Data - SET - OTL': dicR['Data'] - dicR['SET'] - dicR['OTL'],                       # for IONO
+                        'All': dicR['Data'] - dicR['SET'] - dicR['OTL'] - dicR['IONO median'] - fit,
+                        }                                                                                   # All corrections
+                
+            else:
+                # Compute the fit after all corrections
+                corrected = dicR['Data'] - dicR['SET'] - dicR['IONO median']
+                cst, vel, sin, cos = utils.linear_seasonal_fit(self.dates_decyr, corrected, min_date=min_date, max_date=max_date)
+                fit = cst+self.dates_decyr*vel+sin*np.sin(2*np.pi*self.dates_decyr)+cos*np.cos(2*np.pi*self.dates_decyr)
+                # Set all the time-series
+                data = {'Data - IONO - fit': dicR['Data'] - dicR['IONO median'] - fit,                      # for SET
+                        'Data - SET': dicR['Data'] - dicR['SET'],                                           # for IONO
+                        'All': dicR['Data'] - dicR['SET'] - dicR['IONO median'] - fit,
+                        }   
+
+            # Raw data and SET
+            data = {'Data': dicR['Data'],
+                    'Data - SET': dicR['Data'] - dicR['SET']
+                   }
+            
+            # OTL if exists
+            if do_otl:
+                data['Data - OTL'] = dicR['Data'] - dicR['OTL']
+
+            # Iono
+            data['Data - IONO'] = dicR['Data'] - dicR['IONO median']
+            
+            # All corrections
+            if do_otl:
+                data['Data - ALL'] = dicR['Data'] - dicR['SET'] - dicR['OTL'] - dicR['IONO median']
+            else:
+                data['Data - ALL'] = dicR['Data'] - dicR['SET'] - dicR['IONO median']
+
+            for d in data:
+                # Store results
+                if type == 'Range':
+                    self.ra_stdred[d] = np.nanstd(data[d])
+                if type == 'Azimuth':
+                    self.az_stdred[d] = np.nanstd(data[d])
+
+        return
+
+    def computeStds2(self, relative=False, models=None, min_date=None, max_date=None):
+        '''
+        NB: modified to remove one correction while keeping the others (like analysisIonoSETOTL2).
+        Computes the standard deviation of ramps:
+            - on raw ramp time-series
+            - after correction for Solid Earth Tides (SET) if existing
+            - after correction for Ocean Tide Loadgin (OTL) if existing
+            - after correction for ionosphere (using the median of several models)
+        Results stored in the self.ra_std and self.az_std dicts
+
+        Kwargs:
+            * relative: if True, compute the variation of standard deviation w.r.t.raw data: (std_corr-std_raw)/std_raw
+            * models : list of models to use to compute de median model (if None use self.possible_iono_models)
+            * min_date  : only fit data after this date
+            * max_date  : only fit data before this date
+
+        Returns:
+            * None
+        '''
+        if models is None: # Find all the ionospheric models
+            models = self.possible_iono_models
+        elif not isinstance(models, list):
+            sys.exit('Problem with model list')
+
+        # Define dicts for range et azimuth ramps
+        R = {}
+        R['Range'] = {}
+        R['Azimuth'] = {}
+        R['Range']['Data'] = self.ra_ramps['Data']
+        R['Azimuth']['Data'] = self.az_ramps['Data']
+        R['Range']['SET'] = self.ra_ramps['SET']
+        R['Azimuth']['SET'] = self.az_ramps['SET']
+        
+        if 'OTL' in self.ra_ramps:
+            do_otl = 1
+            R['Range']['OTL'] = self.ra_ramps['OTL']
+            R['Azimuth']['OTL'] = self.az_ramps['OTL']
+        else:
+            do_otl = 0
+            R['Range']['OTL'] = np.zeros_like(self.ra_ramps['Data'])
+            R['Azimuth']['OTL'] = np.zeros_like(self.az_ramps['Data'])
+
+        self.computeIonoMedian()
+        R['Range']['IONO median'] = self.ra_ramps['Iono median']
+        R['Azimuth']['IONO median'] = self.az_ramps['Iono median']
+
+        xy = {'Range': 'x', 'Azimuth':'y'}
+        self.ra_std = {}
+        self.az_std = {}
+
+        for type in xy:
+            dicR = R[type]
+
+            # Fill an array with all the datasets to fit
+
+            # Raw data and SET
+            data = {'Data': dicR['Data'],
+                    'Data - SET': dicR['Data'] - dicR['SET']
+                   }
+            
+            # OTL if exists
+            if do_otl:
+                # Compute the fit after all corrections
+                corrected = dicR['Data'] - dicR['SET'] - dicR['OTL'] - dicR['IONO median']
+                cst, vel, sin, cos = utils.linear_seasonal_fit(self.dates_decyr, corrected, min_date=min_date, max_date=max_date)
+                fit = cst+self.dates_decyr*vel+sin*np.sin(2*np.pi*self.dates_decyr)+cos*np.cos(2*np.pi*self.dates_decyr)
+                # Set all the time-series
+                data = {'Data': dicR['Data'],                                                               # Raw
+                        'Data - OTL - IONO - fit': dicR['Data'] - dicR['OTL'] - dicR['IONO median'] - fit,  # for SET
+                        'Data - SET - IONO - fit': dicR['Data'] - dicR['SET'] - dicR['IONO median'] - fit,  # for OTL
+                        'Data - SET - OTL': dicR['Data'] - dicR['SET'] - dicR['OTL'],                       # for IONO
+                        'Data - SET - OTL - IONO - fit': dicR['Data'] - dicR['SET'] - dicR['OTL'] - dicR['IONO median'] - fit,
+                        }                                                                                   # All corrections
+            else:
+                # Compute the fit after all corrections
+                corrected = dicR['Data'] - dicR['SET'] - dicR['IONO median']
+                cst, vel, sin, cos = utils.linear_seasonal_fit(self.dates_decyr, corrected, min_date=min_date, max_date=max_date)
+                fit = cst+self.dates_decyr*vel+sin*np.sin(2*np.pi*self.dates_decyr)+cos*np.cos(2*np.pi*self.dates_decyr)
+                # Set all the time-series
+                data = {'Data': dicR['Data'],                                                               # Raw
+                        'Data - IONO - fit': dicR['Data'] - dicR['IONO median'] - fit,                      # for SET
+                        'Data - SET': dicR['Data'] - dicR['SET'],                                           # for IONO
+                        'Data - SET - IONO - fit': dicR['Data'] - dicR['SET'] - dicR['IONO median'] - fit,
+                        }                                                                                   # All corrections
+
+            for d in data:
+                # Store results
+                if type == 'Range':
+                    if relative:
+                        self.ra_std[d] = (np.nanstd(data[d])-np.nanstd(data['Data']))/np.nanstd(data['Data'])
+                    else:
+                        self.ra_std[d] = np.nanstd(data[d])
+                if type == 'Azimuth':
+                    if relative:
+                        self.az_std[d] = (np.nanstd(data[d])-np.nanstd(data['Data']))/np.nanstd(data['Data'])
+                    else:
+                        self.az_std[d] = np.nanstd(data[d])
 
         return
 
