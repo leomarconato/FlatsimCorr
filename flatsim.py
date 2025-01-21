@@ -19,6 +19,7 @@ import ftplib, urllib
 from spacepy import pycdf
 import netCDF4
 import gzip
+import h5py
 
 # Locals
 from . import utils
@@ -493,7 +494,7 @@ class flatsim(object):
         
         return
     
-    def downloadTecIGS(self, date, dir=None, replace=False):
+    def downloadTecIGS(self, date, replace=False):
         '''
         Download the CDF files from cdaweb.gsfc.nasa.gov corresponding to one date (all IGS TEC computations for one day contained in one file)
         Requires max_time_utc variable.
@@ -503,7 +504,6 @@ class flatsim(object):
             * date    : date to consider (YYYMMDD)
 
         Kwargs:
-            * dir     : relative path to store iono files in a 'iono_igs' folder (default, self.savedir)
             * replace : re-download the .cdf file if existing (default, False)
 
         Returns:
@@ -567,17 +567,16 @@ class flatsim(object):
 
         return
 
-    def downloadTecJPLD(self, date, dir=None, replace=False):
+    def downloadTecJPLD(self, date, replace=False):
         '''
         Download the netCDF files from sideshow.jpl.nasa.gov corresponding to the JPLD model for one date (Martire et al., 2024)
-        Requires max_time_utc variable.
+        Requires mean_time_utc variable.
             -> run after getAcquisitionTime
 
         Args:
             * date    : date to consider (YYYMMDD)
 
         Kwargs:
-            * dir     : relative path to store iono files in a 'iono_jpld' folder (default, self.savedir)
             * replace : re-download the .nc.gz file if existing (default, False)
 
         Returns:
@@ -636,6 +635,51 @@ class flatsim(object):
                     os.remove(local_file)
                     print(f'{jpld_file} not found on server')
 
+        return
+
+    def downloadTecMIT(self, date, replace=False):
+        '''
+        Download the HDF5 files from cedar.openmadrigal.org corresponding to the MIT model for one date.
+        Files are heavy thus downloading them can be quite long.
+
+        Args:
+            * date    : date to consider (YYYMMDD)
+
+        Kwargs:
+            * replace : re-download the .hdf5 file if existing (default, False)
+
+        Returns:
+            * None
+        '''
+        # Create dict to store local paths to ionest files, if not existing alread
+        if not hasattr(self, 'mit_files'):
+            self.mit_files = {}
+
+        # Local directory to store files
+        self.local_mit_dir = os.path.join(self.savedir, 'iono_mit')
+        if not os.path.isdir(self.local_mit_dir):
+            os.makedirs(self.local_mit_dir)
+
+        year = date[:4]
+        months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+        month = months[int(date[4:6])-1]
+        day = date[6:]
+
+        # DOWNLOAD actual day
+        mit_file = f'gps{date[2:]}g.002.hdf5'
+        local_file = os.path.join(self.local_mit_dir, mit_file)
+
+        if os.path.isfile(local_file) and not replace:
+            self.mit_files[date] = local_file
+        else:
+            try:
+                url = f'http://cedar.openmadrigal.org/static/experiments4/{year}/gps/{day}{month}{year[2:]}/{mit_file}'
+                urllib.request.urlretrieve(url, filename=local_file)
+                self.mit_files[date] = local_file
+            except:
+                os.remove(local_file)
+                print(f'{mit_file} not found on server')
+                
         return
 
     def ion2TecRGP(self, ionfile, skip_res):
@@ -774,7 +818,7 @@ class flatsim(object):
         '''
         Compute the TEC map in radar geometry for one date of the TS, 
         using temporal interpolation of IGS models for previous and next steps (2h sampling).
-        Requires the igs_files, local_ion_dir, mean_time_utc, local_igs_dir, lon_iono_before, lon_iono_after and lat_iono variables.
+        Requires the igs_files, mean_time_utc, local_igs_dir, lon_iono_before, lon_iono_after and lat_iono variables.
             -> run after getAcquisitionTime, getLatLon, downloadTecIGS and ground2IPP
 
         Args:
@@ -863,8 +907,8 @@ class flatsim(object):
         '''
         Compute the TEC map in radar geometry for one date of the TS, 
         using temporal interpolation of JPLD models for previous and next steps (15' sampling).
-        Requires the jpld_files, local_ion_dir, mean_time_utc, local_jpld_dir, lon_iono_before, lon_iono_after and lat_iono variables.
-            -> run after getAcquisitionTime, getLatLon, downloadTecIGS and ground2IPP
+        Requires the jpld_files, mean_time_utc, local_jpld_dir, lon_iono_before, lon_iono_after and lat_iono variables.
+            -> run after getAcquisitionTime, getLatLon, downloadTecJPLD and ground2IPP
 
         Args:
             * date    : date to consider (YYYMMDD)
@@ -954,6 +998,124 @@ class flatsim(object):
                     plt.close()
 
                 return E
+
+    def HDF5ExtractTecArray(self, data, time_dict):
+        # Filter rows matching the target time
+        time_mask = (
+            (data['hour'] == time_dict['hour']) &
+            (data['min'] == time_dict['min']) &
+            (data['sec'] == time_dict['sec'])
+        )
+        filtered_data = data[time_mask]
+        
+        # Extract unique gdlat and glon values
+        gdlat_unique = np.flip(np.unique(filtered_data['gdlat']))
+        glon_unique = np.unique(filtered_data['glon'])
+        
+        # Initialize the 2D array for 'tec'
+        tec_grid = np.full((180, 360), np.nan)
+        
+        # Map gdlat and glon to grid indices
+        gdlat_indices = {val: idx for idx, val in enumerate(gdlat_unique)}
+        glon_indices = {val: idx for idx, val in enumerate(glon_unique)}
+        
+        # Populate the grid with 'tec' values
+        for row in filtered_data:
+            lat_idx = gdlat_indices[row['gdlat']]
+            lon_idx = glon_indices[row['glon']]
+            tec_grid[lat_idx, lon_idx] = row['tec']
+
+        return tec_grid
+
+    def computeTecMIT(self, date, skip_res=100, plot=False, saveplot=True):
+        '''
+        Compute the TEC map in radar geometry for one date of the TS, 
+        using spatial interpolation of MIT models.
+        The previous and next time samples (5' sampling) are used to maximize spatial coverage.
+        Requires the mit_files, mean_time_utc, local_mit_dir, lon_iono and lat_iono variables.
+            -> run after getAcquisitionTime, getLatLon, downloadTecMIT and ground2IPP
+
+        Args:
+            * date    : date to consider (YYYMMDD)
+
+        Kwargs:
+            * skip_res   : decimation factor in range and azimuth (default, 100)
+            * plot       : plot the TEC map
+            * saveplot   : save the plot of the TEC
+
+        Returns:
+            * TEC array in radar geometry, decimated by skip_res**2, in TECU
+        '''
+        # Load the data
+        with h5py.File(self.mit_files[date], 'r') as hdf_file:
+            hdf5_data = np.array(hdf_file['Data/Table Layout'])
+
+        # Find the time samples surrrounding the acquisition
+        time_modif = self.mean_time_utc - 1/60/2 # Remove 30 seconds to match the data sampling
+        hour = int(time_modif)
+        minute = (time_modif-hour)*60
+        min_arr = np.unique(hdf5_data['min'])
+        idx = np.argmin(np.abs(min_arr-minute))
+        if min_arr[idx] < minute:   # Closest value is before
+            min_before = min_arr[idx]
+            hour_before = hour
+            if idx+1 >= len(min_arr):
+                min_after = min_arr[0]
+                hour_after = hour+1
+            else:
+                min_after = min_arr[idx+1]
+                hour_after = hour
+            if hour_after > 23:
+                sys.exit("Acquisition time close to midnight (not implemented)")
+        else:                       # Closest value is after
+            min_after = min_arr[idx]
+            hour_after = hour
+            if idx-1 < 0:
+                min_before = min_arr[-1]
+                hour_before = hour-1
+            else:
+                min_before = min_arr[idx-1]
+                hour_before = hour
+            if hour_before < 0:
+                sys.exit("Acquisition time close to midnight (not implemented)")
+
+        print(f'{hour_before}h{min_before:.0f} < {hour}h{minute:.2f}  < {hour_after}h{min_after:.0f}')
+
+        # Extract TEC data at both time samples
+        tec_before = self.HDF5ExtractTecArray(hdf5_data, {'hour': hour_before, 'min':min_before, 'sec':30})
+        tec_after = self.HDF5ExtractTecArray(hdf5_data, {'hour': hour_after, 'min':min_after, 'sec':30})
+
+        # Combine them: mean of both when they are both not nan, else we keep the valid value, if one is
+        tec = np.where(np.logical_and(np.isnan(tec_before), np.isnan(tec_after)), np.nan,
+                    np.where(np.isnan(tec_before), tec_after,
+                                np.where(np.isnan(tec_after), tec_before, (tec_before+tec_after)/2)))
+        
+        # Prepare interpolation in radar geometry
+        lats = np.arange(-90, 90)
+        lons = np.arange(-180, 180)
+        lon_arr, lat_arr = np.meshgrid(lons, lats)
+        tec_list = tec[~np.isnan(tec)]
+        lat_list = lat_arr[~np.isnan(tec)]
+        lon_list = lon_arr[~np.isnan(tec)]
+
+        # Interpolate
+        tec_interp = griddata((lat_list, lon_list), tec_list,
+                              (self.lat_iono[::skip_res,::skip_res], self.lon_iono[::skip_res,::skip_res]), 
+                              method='cubic')
+
+        # PLOT
+        if plot or saveplot:
+            plt.imshow(tec_interp)
+            plt.colorbar(label='E (TECU)', shrink=0.5)
+            plt.title(f'{date} - {round(self.mean_time_utc, 1)}h')
+
+            if plot:
+                plt.show()
+            if saveplot:
+                plt.savefig(os.path.join(self.local_mit_dir, 'TEC_'+date+'.jpg'))
+            plt.close()
+
+        return tec_interp
 
     def ground2shell(self, lat, lon, H=400, earth_radius=6371):
         '''
@@ -1168,7 +1330,9 @@ class flatsim(object):
     def Tec2Ips3(self, E, skip_res=1, hIPP=400, wavelength=0.0556, top_iono=0.9, plot=False):
         '''
         Compute the Ionospheric Phase Screen from a TEC map.
-        Implementation of the mapping function of Yunjun et al. (2022).
+        Implementation of the mapping function of Yunjun et al. (2022), without the effect of refraction.
+        Best MF to use since a theoretical analysis shows that the change in incidence angle 
+        due to refraction is negligible for frequencies used in SAR imagery.
 
         Args:
             * E         : TEC array (in TECU)
@@ -1244,13 +1408,15 @@ class flatsim(object):
 ####################################################
 
 ### Yunjun mapping function without refraction
-### NB: topside iono factor set at 0.75 by default (changed from 0.9 in (former) MF3 on 13/01/25)
+### NB: topside iono factor set at 0.84 by default (NeQuick average)
+###        \-> changed from 0.75 on 20/01/25
+###        \-> changed from 0.9 in (former) MF3 on 13/01/25
 ###     ionosphere height set at 400 km by default
 
     def computeTecRampsRGP(self, skip_res=None, top_iono=0.84):
         '''
         Compute ramps due to TEC from the RGP IONEX model (centered on France)
-        /!\ New mapping function with only change if incidence angle at IPP (no refraction)
+        /!\ New mapping function with only change of incidence angle at IPP (no refraction)
         
         Kwargs:
             * skip_res   : decimation factor in range and azimuth (default, computed from self.look_unw)
@@ -1351,7 +1517,7 @@ class flatsim(object):
     def computeTecRampsIGS(self, skip_res=None, top_iono=0.84, model='IGS'):
         '''
         Compute ramps due to TEC from different GIMs compiled by IGS.
-        /!\ New mapping function with only change if incidence angle at IPP (no refraction)
+        /!\ New mapping function with only change of incidence angle at IPP (no refraction)
         
         Kwargs:
             * model      : model to used: IGS, JPL, CODE, ESA, UPC (default, IGS)
@@ -1467,7 +1633,7 @@ class flatsim(object):
     def computeTecRampsJPLD(self, skip_res=None, top_iono=0.84):
         '''
         Compute ramps due to TEC from the JPLD research GIM (1°, 15' resolution).
-        /!\ New mapping function with only change if incidence angle at IPP (no refraction)
+        /!\ New mapping function with only change of incidence angle at IPP (no refraction)
         
         Kwargs:
             * skip_res   : decimation factor in range and azimuth (default, computed from self.look_unw)
@@ -1579,6 +1745,100 @@ class flatsim(object):
 
         return
 
+    def computeTecRampsMIT(self, skip_res=None, top_iono=0.84):
+        '''
+        Compute ramps due to TEC from the MIT (Madrigual) TEC model.
+        /!\ New mapping function with only change of incidence angle at IPP (no refraction)
+        
+        Kwargs:
+            * skip_res   : decimation factor in range and azimuth (default, computed from self.look_unw)
+
+        Returns:
+            * None
+        '''
+        if skip_res is None:
+            skip_res = int(800/self.look_unw) # 8rlks -> 100; 16rlks -> 50...
+
+        self.getAcquisitionTime()
+        self.getLatLon()
+        self.getIncidence()
+
+        if self.verbose:
+            print("\n---------------------------------")
+            print(f"    Computing ionospheric ramps with MIT TEC model")
+            print(f"    Decimation factor: {skip_res}")
+            
+        if self.verbose:
+            print(f"\n        Fetch MIT TEC data for all dates...")
+
+        for date in tqdm(self.dates):
+            
+            self.downloadTecMIT(date)
+
+        num_prod = len(list(self.mit_files.keys()))
+
+        if num_prod < self.Ndates:
+            print(f'            -> {self.Ndates-num_prod} out of {self.Ndates} have no TEC data on the MIT repository')
+        else:
+            print(f'            -> All dates have data for both times steps on the MIT repository')
+
+        if self.verbose:
+            print(f"\n        Compute IPP coordinates...")
+
+        self.ground2IPP(plot=False, saveplot=True)
+
+        if self.verbose:
+            print(f"\n        Compute TEC maps and fit ramps for all dates...")
+
+        self.ramp_az_mit = np.zeros(self.Ndates)
+        self.ramp_ra_mit = np.zeros(self.Ndates)
+        self.ramp_sig_mit = np.zeros(self.Ndates)
+
+        for i in tqdm(range(self.Ndates)):
+            date = self.dates[i]
+
+            if date in len(list(self.mit_files.keys())):
+
+                # Get the TEC 
+                tec = self.computeTecMIT(date, skip_res=skip_res, plot=False, saveplot=False)
+
+                # Then convert to phase
+                ips = self.Tec2Ips3(tec, skip_res=skip_res, top_iono=top_iono)
+
+                # Then fit ramps
+                self.ramp_az_mit[i], self.ramp_ra_mit[i], self.ramp_sig_mit[i] = self.fitPhaseRamp(ips, skip_res=skip_res)
+
+        # Put zeros to nan
+        self.ramp_az_mit[self.ramp_az_mit == 0.] = np.nan
+        self.ramp_ra_mit[self.ramp_ra_mit == 0.] = np.nan
+        self.ramp_sig_mit[self.ramp_sig_mit == 0.] = np.nan
+        
+        # Reference with first date
+        if self.ramp_az_mit[0] != np.nan:
+            self.ramp_az_mit -= self.ramp_az_mit[0]
+            self.ramp_ra_mit -= self.ramp_ra_mit[0]
+        else:
+            sys.exit('Ramp of first date is NaN, reference in another way...')
+
+        # Save AZIMUTH ramps
+        header = f'date_decyr az_ramp / number_of_products date'
+        file = os.path.join(self.local_mit_dir, f'list_ramp_az_MIT.txt')
+        arr = np.c_[ self.dates_decyr, self.ramp_az_mit, np.zeros(self.Ndates), num_prod, self.dates ].astype(float)
+        np.savetxt(file, arr, fmt='%.6f % .7e % .7e %  2i % 6d', header=header)
+
+        # Save RANGE ramps
+        header = f'date_decyr ra_ramp / number_of_products date'
+        file = os.path.join(self.local_mit_dir, f'list_ramp_ra_MIT.txt')
+        arr = np.c_[ self.dates_decyr, self.ramp_ra_mit, np.zeros(self.Ndates), num_prod, self.dates ].astype(float)
+        np.savetxt(file, arr, fmt='%.6f % .7e % .7e %  2i % 6d', header=header)
+
+        # Save SIGMA
+        header = f'date_decyr sigma date'
+        file = os.path.join(self.local_mit_dir, f'list_ramp_sigma_MIT.txt')
+        arr = np.c_[ self.dates_decyr, self.ramp_sig_mit, self.dates ].astype(float)
+        np.savetxt(file, arr, fmt='%.6f % .7e % 6d')
+
+        return
 
 #################### OLD #####################
 
