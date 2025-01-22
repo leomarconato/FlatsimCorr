@@ -1378,7 +1378,7 @@ class ramps(object):
             * models : list of models to use to compute de median model (if None use self.possible_iono_models)
             * min_date  : only fit data after this date
             * max_date  : only fit data before this date
-            
+
         Returns:
             * None
         '''
@@ -1425,47 +1425,32 @@ class ramps(object):
                 cst, vel, sin, cos = utils.linear_seasonal_fit(self.dates_decyr, corrected, min_date=min_date, max_date=max_date)
                 fit = cst+self.dates_decyr*vel+sin*np.sin(2*np.pi*self.dates_decyr)+cos*np.cos(2*np.pi*self.dates_decyr)
                 # Set all the time-series
-                data = {'Data - OTL - IONO - fit': dicR['Data'] - dicR['OTL'] - dicR['IONO median'] - fit,  # for SET
-                        'Data - SET - IONO - fit': dicR['Data'] - dicR['SET'] - dicR['IONO median'] - fit,  # for OTL
-                        'Data - SET - OTL': dicR['Data'] - dicR['SET'] - dicR['OTL'],                       # for IONO
-                        'All': dicR['Data'] - dicR['SET'] - dicR['OTL'] - dicR['IONO median'] - fit,
-                        }                                                                                   # All corrections
+                data = {}
+                data['SET'] = {'ref': dicR['Data'] - dicR['OTL'] - dicR['IONO median'] - fit,
+                               'corr':  dicR['Data'] - dicR['SET'] - dicR['OTL'] - dicR['IONO median'] - fit}
+                data['OTL'] = {'ref': dicR['Data'] - dicR['SET'] - dicR['IONO median'] - fit,
+                               'corr':  dicR['Data'] - dicR['SET'] - dicR['OTL'] - dicR['IONO median'] - fit}
+                data['IONO'] = {'ref': dicR['Data'] - dicR['SET'] - dicR['OTL'] - fit,
+                                'corr':  dicR['Data'] - dicR['SET'] - dicR['OTL'] - dicR['IONO median'] - fit}
                 
-            else:
+            else: # TO DO
                 # Compute the fit after all corrections
                 corrected = dicR['Data'] - dicR['SET'] - dicR['IONO median']
                 cst, vel, sin, cos = utils.linear_seasonal_fit(self.dates_decyr, corrected, min_date=min_date, max_date=max_date)
                 fit = cst+self.dates_decyr*vel+sin*np.sin(2*np.pi*self.dates_decyr)+cos*np.cos(2*np.pi*self.dates_decyr)
                 # Set all the time-series
-                data = {'Data - IONO - fit': dicR['Data'] - dicR['IONO median'] - fit,                      # for SET
-                        'Data - SET': dicR['Data'] - dicR['SET'],                                           # for IONO
-                        'All': dicR['Data'] - dicR['SET'] - dicR['IONO median'] - fit,
-                        }   
-
-            # Raw data and SET
-            data = {'Data': dicR['Data'],
-                    'Data - SET': dicR['Data'] - dicR['SET']
-                   }
-            
-            # OTL if exists
-            if do_otl:
-                data['Data - OTL'] = dicR['Data'] - dicR['OTL']
-
-            # Iono
-            data['Data - IONO'] = dicR['Data'] - dicR['IONO median']
-            
-            # All corrections
-            if do_otl:
-                data['Data - ALL'] = dicR['Data'] - dicR['SET'] - dicR['OTL'] - dicR['IONO median']
-            else:
-                data['Data - ALL'] = dicR['Data'] - dicR['SET'] - dicR['IONO median']
-
+                data = {}
+                data['SET'] = {'ref': dicR['Data'] - dicR['IONO median'] - fit,
+                               'corr':  dicR['Data'] - dicR['SET'] - dicR['IONO median'] - fit}
+                data['IONO'] = {'ref': dicR['Data'] - dicR['SET'] - fit,
+                                'corr':  dicR['Data'] - dicR['SET'] - dicR['IONO median'] - fit}
+                  
             for d in data:
                 # Store results
                 if type == 'Range':
-                    self.ra_stdred[d] = np.nanstd(data[d])
+                    self.ra_stdred[d] = (np.nanstd(data[d]['corr'])-np.nanstd(data[d]['ref']))/np.nanstd(data[d]['ref'])
                 if type == 'Azimuth':
-                    self.az_stdred[d] = np.nanstd(data[d])
+                    self.az_stdred[d] = (np.nanstd(data[d]['corr'])-np.nanstd(data[d]['ref']))/np.nanstd(data[d]['ref'])
 
         return
 
