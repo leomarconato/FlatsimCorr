@@ -1824,13 +1824,13 @@ class flatsim(object):
         header = f'date_decyr az_ramp / date'
         file = os.path.join(self.local_mit_dir, f'list_ramp_az_MIT.txt')
         arr = np.c_[ self.dates_decyr, self.ramp_az_mit, np.zeros(self.Ndates), self.dates ].astype(float)
-        np.savetxt(file, arr, fmt='%.6f % .7e % .7e %  2i % 6d', header=header)
+        np.savetxt(file, arr, fmt='%.6f % .7e % .7e % 6d', header=header)
 
         # Save RANGE ramps
         header = f'date_decyr ra_ramp / date'
         file = os.path.join(self.local_mit_dir, f'list_ramp_ra_MIT.txt')
         arr = np.c_[ self.dates_decyr, self.ramp_ra_mit, np.zeros(self.Ndates), self.dates ].astype(float)
-        np.savetxt(file, arr, fmt='%.6f % .7e % .7e %  2i % 6d', header=header)
+        np.savetxt(file, arr, fmt='%.6f % .7e % .7e % 6d', header=header)
 
         # Save SIGMA
         header = f'date_decyr sigma date'
