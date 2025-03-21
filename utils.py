@@ -34,11 +34,24 @@ def remove_outliers(ramps, sigma=10.):
         ramps[np.abs(ramps-median) > sigma*std] = np.nan
         return ramps
 
-def sliding_median(x, y, window=0.3):
+def sliding_median(x, y, window=0.3, min_val=5):
     y_filt = np.zeros_like(y)
     for i in range(len(x)):
         sel = np.logical_and(x > x[i]-window/2, x < x[i]+window/2)
-        y_filt[i] = np.nanmedian(y[sel])
+        if np.count_nonzero(sel) < min_val:
+            y_filt[i] = np.nan
+        else:
+            y_filt[i] = np.nanmedian(y[sel])
+    return y_filt
+
+def sliding_std(x, y, window=0.3, min_val=5):
+    y_filt = np.zeros_like(y)
+    for i in range(len(x)):
+        sel = np.logical_and(x > x[i]-window/2, x < x[i]+window/2)
+        if np.count_nonzero(sel) < min_val:
+            y_filt[i] = np.nan
+        else:
+            y_filt[i] = np.nanstd(y[sel])
     return y_filt
 
 def iono2key(model):
@@ -234,6 +247,28 @@ def correlate(x1, y1, x2, y2, window=30/365):
             slope[i],_,_,_,_ = linregress(y2[sel], y1[sel])
 
     return x1, np.where(rho==0., np.nan, rho), np.where(slope==0., np.nan, slope)
+
+def correlate_all(x1, y1, x2, y2):
+
+    # Remove NaNs
+    x1 = x1[~np.isnan(y1)]
+    y1 = y1[~np.isnan(y1)]
+    x2 = x2[~np.isnan(y2)]
+    y2 = y2[~np.isnan(y2)]
+
+    # Keep only common values
+    common_values = np.intersect1d(x1, x2)
+    indices_in_x1 = np.where(np.isin(x1, common_values))[0]
+    indices_in_x2 = np.where(np.isin(x2, common_values))[0]
+
+    x1 = x1[indices_in_x1]
+    y1 = y1[indices_in_x1]
+    y2 = y2[indices_in_x2]
+
+    rho = np.corrcoef(y1, y2)[0,1]
+    slope,_,_,_,_ = linregress(y2, y1)
+
+    return rho, slope
 
 def dif_ramps(dict_x, dict_y, data1, data2):
 

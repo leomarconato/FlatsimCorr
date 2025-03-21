@@ -72,6 +72,8 @@ class ramps(object):
                 self.iono_colors[model] = 'tab:pink'
             if 'RGP' in model:
                 self.iono_colors[model] = 'tab:brown'
+            if 'MIT' in model:
+                self.iono_colors[model] = 'crimson'
 
         if self.verbose:
             print("---------------------------------")
@@ -405,11 +407,12 @@ class ramps(object):
 
         return
     
-    def loadOTLRamps(self, remove_outliers=False, zero_median=False, plot=False):
+    def loadOTLRamps(self, andes=False, remove_outliers=False, zero_median=False, plot=False):
         '''
         Read (and plot) the files containing the (az and ra) ramps computed from a OTL model.
 
         Kwargs:
+            * andes : adapt to the file format given by Bertrand (csv files, all in the same folder)
             * remove_outliers : number of standard deviations to filter outliers
             * zero_median     : center the ramps on zero by removing the median (after removing outliers)
             * plot     : Plot the ramps and sigma?
@@ -422,7 +425,10 @@ class ramps(object):
             print("\n---------------------------------")
             print("    Look for OTL ramps")
 
-        otl_file = os.path.join(os.path.join(self.ts_dir, f'tilt_otl_range_az.txt'))
+        if andes:
+            otl_file = os.path.join(os.path.join('OTL_ramps_FLATSIM_Andes_2025', f'ramps_OTL_{self.name}.csv'))
+        else:
+            otl_file = os.path.join(os.path.join(self.ts_dir, f'tilt_otl_range_az.txt'))
 
         if os.path.isfile(otl_file):
             otl_dates = list(np.loadtxt(otl_file, usecols=0))
@@ -955,7 +961,8 @@ class ramps(object):
 
         Kwargs:
             * saveplot : save the plots?
-            * models : list of models to use (if None use self.possible_iono_models)
+            * models : list of models to use to compute the iono median (if None use self.possible_iono_models)
+                            NB: all available models are plotted anyway
             * min_date  : only fit data after this date
             * max_date  : only fit data before this date
             * itrf_ra : plot a ramp rate in range
@@ -990,13 +997,13 @@ class ramps(object):
             R['Range']['OTL'] = np.zeros_like(self.ra_ramps['Data'])
             R['Azimuth']['OTL'] = np.zeros_like(self.az_ramps['Data'])
 
-        self.computeIonoMedian()
+        self.computeIonoMedian(models=models)
         R['Range']['IONO median'] = self.ra_ramps['Iono median']
         R['Azimuth']['IONO median'] = self.az_ramps['Iono median']
 
         modelkeys = []
         colors = []
-        for model in models:
+        for model in self.possible_iono_models:
             temp_key = utils.iono2key(model)
             if temp_key in list(self.ra_ramps.keys()):
                 modelkeys.append(temp_key)
@@ -1013,6 +1020,8 @@ class ramps(object):
 
             # Compute the fit after all corrections
             corrected = (dicR['Data'] - dicR['SET'] - dicR['OTL'] - dicR['IONO median']) # with median of iono models
+            cst, vel, sin, cos = utils.linear_seasonal_fit(self.dates_decyr, dicR['Data'], min_date=min_date, max_date=max_date)
+            fit0 = cst+self.dates_decyr*vel+sin*np.sin(2*np.pi*self.dates_decyr)+cos*np.cos(2*np.pi*self.dates_decyr)
             cst, vel, sin, cos = utils.linear_seasonal_fit(self.dates_decyr, corrected, min_date=min_date, max_date=max_date)
             fit = cst+self.dates_decyr*vel+sin*np.sin(2*np.pi*self.dates_decyr)+cos*np.cos(2*np.pi*self.dates_decyr)
             
@@ -1025,13 +1034,16 @@ class ramps(object):
                 axs[do_otl,0].plot(self.dates_decyr, dicR['Data']-dicR['SET']-dicR['IONO median']-fit, c='k', linewidth=0.5, label='Data - SET - IONO (median) - fit')
                 axs[do_otl,0].plot(self.dates_decyr, dicR['OTL'], c='dodgerblue', linewidth=1, alpha=0.8, label='OTL')
             
-            axs[1+do_otl,0].plot(self.dates_decyr, dicR['Data']-dicR['SET']-dicR['OTL'], c='k', linewidth=0.5, ls=':', label='Data - SET'+otl_label+'')
+            axs[1+do_otl,0].plot(self.dates_decyr, dicR['Data']-dicR['SET']-dicR['OTL'], c='k', linewidth=0.5, ls=':', label='Data - SET'+otl_label)
             filtered = utils.sliding_median(self.dates_decyr, dicR['Data']-dicR['SET']-dicR['OTL'])
             axs[1+do_otl,0].plot(self.dates_decyr, filtered, c='k', linewidth=1, label='Data - SET'+otl_label+' filtered')
 
             for i in range(len(modelkeys)):
                 axs[1+do_otl,0].plot(self.dates_decyr, dicR[modelkeys[i]], linewidth=1, alpha=0.8, label=modelkeys[i], color=colors[i])
             
+            # TEMP ?
+            #axs[2+do_otl,0].plot(self.dates_decyr, dicR['Data'], c='grey', linewidth=0.5, ls='--', label='Data')
+            # TEMP ?
             axs[2+do_otl,0].plot(self.dates_decyr, corrected, c='k', linewidth=0.5, label='Data - SET'+otl_label+' - IONO (median)')
             axs[2+do_otl,0].plot(self.dates_decyr, fit, c='tab:green', linewidth=2, alpha=0.8, 
                                  label='Linear + seasonal fit')
@@ -1053,12 +1065,13 @@ class ramps(object):
                 #axs[1,1].scatter(dicR['Data']-dicR['SET'], dicR[models[i]], marker='.', linewidth=0, s=10, alpha=0.4)
                 axs[1+do_otl,1].scatter(filtered, dicR[modelkeys[i]], marker='.', linewidths=0, s=10, alpha=0.4, color=colors[i])
 
-            axs[2+do_otl,1].hist(corrected-fit, bins=21, color='tab:green', alpha=0.8)
-
             ### Limits ###
 
             xmin = min(axs[0,1].get_xlim()[0], axs[1,1].get_ylim()[0])
             xmax = max(axs[0,1].get_xlim()[1], axs[1,1].get_ylim()[1])
+
+            axs[2+do_otl,1].hist(dicR['Data']-fit, bins=21, range=[xmin, xmax], color='tab:grey', alpha=0.5)
+            axs[2+do_otl,1].hist(corrected-fit, bins=21, range=[xmin, xmax], color='tab:green', alpha=0.5)
 
             for i in range(axs.shape[0]):
                 axs[i,1].set_xlim(xmin, xmax)
@@ -1082,7 +1095,7 @@ class ramps(object):
                 axs[1, 1].set_ylabel(f'$d\phi/d{xy[type]}$ OTL ({self.ramp_unit})')
             axs[1+do_otl, 1].set_xlabel(f'$d\phi/d{xy[type]}$ data - SET'+otl_label+f' filtered ({self.ramp_unit})')
             axs[1+do_otl, 1].set_ylabel(f'$d\phi/d{xy[type]}$ IONO ({self.ramp_unit})')
-            axs[2+do_otl, 1].set_xlabel(f'$d\phi/d{xy[type]}$ data - SET'+otl_label+f' - IONO - fit ({self.ramp_unit})')
+            axs[2+do_otl, 1].set_xlabel(f'$d\phi/d{xy[type]}$ misfit ({self.ramp_unit})')
             axs[2+do_otl, 1].set_ylabel('N')
 
             ### Indicate R2 ###
@@ -1099,8 +1112,9 @@ class ramps(object):
             #axs[1, 1].text(0.05, 0.95, f"RMSE = \n{utils.RMSE(filtered-dicR['IONO median']):.2e}", transform=axs[1, 1].transAxes, va='top')
             #axs[2, 1].text(0.05, 0.95, f"RMSE = \n{utils.RMSE(corrected-fit):.2e}", transform=axs[2, 1].transAxes, va='top')
             axs[2+do_otl, 1].text(0.05, 0.95, f"RMSE =", transform=axs[2+do_otl, 1].transAxes, va='top')
-            axs[2+do_otl, 1].text(0.05, 0.85, f"{utils.RMSE(corrected-fit):.2e}", transform=axs[2+do_otl, 1].transAxes, va='top')
-  
+            axs[2+do_otl, 1].text(0.05, 0.85, f"{utils.RMSE(dicR['Data']-fit0):.2e}", transform=axs[2+do_otl, 1].transAxes, va='top', color='grey')
+            axs[2+do_otl, 1].text(0.05, 0.75, f"{utils.RMSE(corrected-fit):.2e}", transform=axs[2+do_otl, 1].transAxes, va='top', color='tab:green', weight='bold')
+
             fig.suptitle(f'{self.name} - {type} ramps', weight='bold')
             plt.tight_layout()
 
@@ -1156,7 +1170,7 @@ class ramps(object):
             R['Range']['OTL'] = np.zeros_like(self.ra_ramps['Data'])
             R['Azimuth']['OTL'] = np.zeros_like(self.az_ramps['Data'])
 
-        self.computeIonoMedian()
+        self.computeIonoMedian(models=models)
         R['Range']['IONO median'] = self.ra_ramps['Iono median']
         R['Azimuth']['IONO median'] = self.az_ramps['Iono median']
 
@@ -1245,7 +1259,7 @@ class ramps(object):
             R['Range']['OTL'] = np.zeros_like(self.ra_ramps['Data'])
             R['Azimuth']['OTL'] = np.zeros_like(self.az_ramps['Data'])
 
-        self.computeIonoMedian()
+        self.computeIonoMedian(models=models)
         R['Range']['IONO median'] = self.ra_ramps['Iono median']
         R['Azimuth']['IONO median'] = self.az_ramps['Iono median']
 
@@ -1326,7 +1340,7 @@ class ramps(object):
             R['Range']['OTL'] = np.zeros_like(self.ra_ramps['Data'])
             R['Azimuth']['OTL'] = np.zeros_like(self.az_ramps['Data'])
 
-        self.computeIonoMedian()
+        self.computeIonoMedian(models=models)
         R['Range']['IONO median'] = self.ra_ramps['Iono median']
         R['Azimuth']['IONO median'] = self.az_ramps['Iono median']
 
@@ -1405,7 +1419,7 @@ class ramps(object):
             R['Range']['OTL'] = np.zeros_like(self.ra_ramps['Data'])
             R['Azimuth']['OTL'] = np.zeros_like(self.az_ramps['Data'])
 
-        self.computeIonoMedian()
+        self.computeIonoMedian(models=models)
         R['Range']['IONO median'] = self.ra_ramps['Iono median']
         R['Azimuth']['IONO median'] = self.az_ramps['Iono median']
 
@@ -1496,7 +1510,7 @@ class ramps(object):
             R['Range']['OTL'] = np.zeros_like(self.ra_ramps['Data'])
             R['Azimuth']['OTL'] = np.zeros_like(self.az_ramps['Data'])
 
-        self.computeIonoMedian()
+        self.computeIonoMedian(models=models)
         R['Range']['IONO median'] = self.ra_ramps['Iono median']
         R['Azimuth']['IONO median'] = self.az_ramps['Iono median']
 
