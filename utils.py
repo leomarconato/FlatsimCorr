@@ -12,6 +12,7 @@ import datetime
 from scipy.linalg import lstsq
 from scipy.stats import linregress
 #from scipy.signal import lombscargle
+from scipy.ndimage import gaussian_filter1d
 
 # Some figure parameters...
 import matplotlib
@@ -287,3 +288,104 @@ def dif_ramps(dict_x, dict_y, data1, data2):
     y2 = y2[indices_in_x2]
 
     return x1, y1-y2
+
+def variogram(t, x, num_samples=500, num_lags=100, max_lag=None):
+    """
+    Calcule un variogramme approximatif en sélectionnant un sous-ensemble de points pour réduire la complexité.
+
+    Paramètres :
+    - t : array (N,) des temps (années décimales, irréguliers)
+    - x : array (N,) des valeurs du signal
+    - num_samples : nombre de points à sélectionner pour le calcul (500 par défaut)
+    - num_lags : nombre de bins de lag (50 par défaut)
+    - max_lag : lag maximal à considérer (par défaut, moitié de la durée totale)
+
+    Retourne :
+    - lags : array des lags considérés
+    - gamma : array du variogramme pour chaque lag
+    """
+    
+    t = np.array(t)
+    x = np.array(x)
+    t = t[~np.isnan(x)]
+    x = x[~np.isnan(x)]
+
+    if max_lag is None:
+        max_lag = (np.max(t) - np.min(t)) / 2  # Par défaut, la moitié de la durée totale
+
+    lags = np.linspace(0, max_lag, num_lags)  # Définition des bins de lag
+    gamma = np.zeros(num_lags)  # Initialisation du variogramme
+    counts = np.zeros(num_lags)  # Nombre de paires par bin
+
+    # 🔹 Sélection aléatoire de num_samples points parmi t
+    sample_indices = np.random.choice(len(t), size=min(num_samples, len(t)), replace=False)
+    t_sampled = t[sample_indices]
+    x_sampled = x[sample_indices]
+
+    # 🔹 Calcul des paires uniquement parmi les échantillons sélectionnés
+    for i in range(len(t_sampled)):
+        for j in range(len(t)):  # Comparaison avec tous les points originaux
+            if i != j:
+                tau = abs(t[j] - t_sampled[i])  # Lag entre les deux points
+                diff2 = (x[j] - x_sampled[i]) ** 2  # Différence quadratique
+
+                # Trouver le bin correspondant
+                bin_idx = np.searchsorted(lags, tau) - 1
+                if 0 <= bin_idx < num_lags:
+                    gamma[bin_idx] += diff2
+                    counts[bin_idx] += 1
+
+    # 🔹 Normalisation
+    gamma[counts > 0] /= (2 * counts[counts > 0])
+    gamma[counts == 0] = np.nan  # Éviter les divisions par zéro
+
+    gamma_smooth = gaussian_filter1d(gamma, sigma=2)
+
+    return lags, gamma_smooth
+
+def variogram_full(t, x, num_lags=100, max_lag=None):
+    """
+    Calcule le variogramme expérimental d'une série temporelle.
+
+    Paramètres :
+    - t : array (N,) des temps en années décimales (non nécessairement réguliers)
+    - x : array (N,) des valeurs du signal
+    - num_lags : nombre de lag bins à considérer
+    - max_lag : lag maximal à considérer (par défaut, 50% de l'étendue temporelle)
+
+    Retourne :
+    - lags : array des lags considérés
+    - gamma : array du variogramme pour chaque lag
+    """
+    
+    t = np.array(t)
+    x = np.array(x)
+    t = t[~np.isnan(x)]
+    x = x[~np.isnan(x)]
+    
+    if max_lag is None:
+        max_lag = (np.max(t) - np.min(t)) / 2  # Par défaut, la moitié de la durée totale
+    
+    lags = np.linspace(0, max_lag, num_lags)  # Définition des intervalles de lag
+    gamma = np.zeros(num_lags)  # Initialisation du variogramme
+    counts = np.zeros(num_lags)  # Nombre de paires utilisées pour chaque lag
+    
+    # Calcul du variogramme
+    for i in range(len(t)):
+        for j in range(i + 1, len(t)):  # Évite les doublons
+            tau = abs(t[j] - t[i])  # Calcul du lag
+            diff2 = (x[j] - x[i]) ** 2  # Différence quadratique
+            
+            # Trouver le bin correspondant
+            bin_idx = np.searchsorted(lags, tau) - 1
+            if 0 <= bin_idx < num_lags:
+                gamma[bin_idx] += diff2
+                counts[bin_idx] += 1
+    
+    # Moyenne des valeurs dans chaque bin
+    gamma[counts > 0] /= (2 * counts[counts > 0])
+    gamma[counts == 0] = np.nan  # Éviter les valeurs nulles
+
+    gamma_smooth = gaussian_filter1d(gamma, sigma=2)
+
+    return lags, gamma_smooth
