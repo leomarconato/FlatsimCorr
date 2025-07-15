@@ -45,7 +45,7 @@ class ramps(object):
         * None
     '''
 
-    def __init__(self, name, datadir='.', savedir='.', gim_list=None, wavelength=0.0556, look_unw=8, convert_to_mmkm=False, verbose=True):
+    def __init__(self, name, datadir='.', savedir='.', gim_list=None, wavelength=0.0556, look_unw=8, chantier=None, convert_to_mmkm=False, verbose=True):
 
         self.name = name
         self.verbose = verbose
@@ -97,6 +97,7 @@ class ramps(object):
 
         self.wavelength = wavelength
         self.look_unw = look_unw
+        self.chantier = chantier
 
         if convert_to_mmkm:
             self.ramp_factor = self.wavelength * 1e3/(4*np.pi) * 2150/(self.look_unw/8)/250 
@@ -108,17 +109,19 @@ class ramps(object):
             print('Conversion factor applied on ramps set to', self.ramp_factor)
 
         for dir in dirs:
-            if self.name in dir and 'TS' in dir:
-                if self.verbose:
-                    print(dir)
-                    print("         -> Set as TS directory")
-                self.ts_dir = dir
+            if self.name in dir and '_TS-' in dir and not 'QO' in dir:
+                if not self.chantier or self.chantier in dir:
+                    if self.verbose:
+                        print(dir)
+                        print("         -> Set as TS directory")
+                    self.ts_dir = dir
 
-            if self.name in dir and 'DAUX' in dir:
-                if self.verbose:
-                    print(dir)
-                    print("         -> Set as AUX directory")
-                self.aux_dir = dir
+            if self.name in dir and '_DAUX-' in dir and not 'QO' in dir:
+                if not self.chantier or self.chantier in dir:
+                    if self.verbose:
+                        print(dir)
+                        print("         -> Set as AUX directory")
+                    self.aux_dir = dir
 
         self.az_ramps = {}
         self.ra_ramps = {}
