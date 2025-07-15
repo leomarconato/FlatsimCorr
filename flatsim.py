@@ -50,11 +50,12 @@ class flatsim(object):
         * None
     '''
 
-    def __init__(self, name, datadir='.', savedir='.', look_unw=8, mask=True, verbose=True):
+    def __init__(self, name, datadir='.', savedir='.', look_unw=8, chantier=None, mask=True, verbose=True):
 
         self.name = name
         self.verbose = verbose
         self.look_unw = look_unw
+        self.chantier = chantier
         self.mask = mask
 
         if self.verbose:
@@ -78,16 +79,18 @@ class flatsim(object):
 
         for dir in dirs:
             if self.name in dir and '_TS-' in dir and not 'QO' in dir:
-                if self.verbose:
-                    print(dir)
-                    print("         -> Set as TS directory")
-                self.ts_dir = dir
+                if not self.chantier or self.chantier in dir:
+                    if self.verbose:
+                        print(dir)
+                        print("         -> Set as TS directory")
+                    self.ts_dir = dir
 
             if self.name in dir and '_DAUX-' in dir and not 'QO' in dir:
-                if self.verbose:
-                    print(dir)
-                    print("         -> Set as AUX directory")
-                self.aux_dir = dir
+                if not self.chantier or self.chantier in dir:
+                    if self.verbose:
+                        print(dir)
+                        print("         -> Set as AUX directory")
+                    self.aux_dir = dir
 
         # Exit if data dirs not found
         if self.ts_dir is None or self.aux_dir is None:
