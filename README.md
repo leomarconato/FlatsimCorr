@@ -20,7 +20,7 @@ _utils.py_ contains several tools for analysis and plotting.
 **Install**
 No compilation needed, just clone the repository and add it to your $PYTHONPATH variable :
 
-  git clone [https://github.com/ton-utilisateur/ton-repo.git](https://github.com/leomarconato/FlatsimCorr.git)
+  git clone [https://github.com/leomarconato/FlatsimCorr.git](https://github.com/leomarconato/FlatsimCorr.git)
   cd flatsimcorr
   export PYTHONPATH="$PYTHONPATH:$(pwd)"
 
