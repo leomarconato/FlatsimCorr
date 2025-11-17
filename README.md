@@ -37,9 +37,10 @@ To compute GIM ramps for your FLATSIM data :
     flatsim_dir = '/directory/containing/your/flatsim/data'  # should include both TS and DAUX directories
     track = 'D037SUD'
     ts = flatsim(track, datadir=flatsim_dir)                 # create a ts object
-    ts.computeTecRampsIGS(model='IGS')                       # compute iono ramps with IGS models ('IGS' weighted mead, 'ESA', 'JPL' or 'UPC')
+    ts.computeTecRampsIGS(model='IGS')                       # compute iono ramps with IGS models ('IGS' weighted mean, 'ESA', 'JPL' or 'UPC')
     ts.computeTecRampsJPLD()                                 # compute iono ramps with high-resolution JPLD model
     ts.computeTecRampsRGP()                                  # compute iono ramps with local RGP model for France
 ```
-A directory with the name `ts` will be created in current directory, where computed ramps will be saved (e.g. D037SUD/iono_igs/list_ramp_ra_IGS_ESA.txt).
+
+A directory with the name `track` will be created in current directory, where computed ramps will be saved (e.g. D037SUD/iono_igs/list_ramp_ra_IGS_ESA.txt).
 
